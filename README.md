@@ -2,6 +2,10 @@
 
 Site local para organizar contas do mês, salário, extras, assinaturas, crédito parcelado e contas recorrentes variáveis.
 
+## Preview
+
+![Preview do SF Sistema de Organização Financeira](assets/preview.png)
+
 ## Como abrir
 
 Instale as dependências uma vez:
