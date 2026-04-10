@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SF Sistema de Organização Financeira</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript>
+      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    </noscript>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="aero-orb orb-one"></div>
+    <div class="aero-orb orb-two"></div>
+    <div class="aero-orb orb-three"></div>
+
+    <main class="app-shell">
+      <header class="topbar glass-panel">
+        <div>
+          <p class="eyebrow">SF planner</p>
+          <h1>Sistema de Organização Financeira</h1>
+          <p class="subtitle">Uma planilha simples, bonita e automática para contas, assinaturas, crédito e sobras do mês.</p>
+        </div>
+        <nav class="nav-pills" aria-label="Navegação principal">
+          <button class="nav-pill active" data-view-target="dashboard">Início</button>
+          <button class="nav-pill" data-view-target="subscriptions">Assinaturas</button>
+          <button class="nav-pill" data-view-target="credits">Crédito</button>
+          <button class="nav-pill" data-view-target="templates">Caixas</button>
+          <button class="nav-pill" data-view-target="settings">Configuração</button>
+        </nav>
+      </header>
+
+      <section class="view active" id="dashboard-view">
+        <section class="dashboard-grid">
+          <article class="month-hero glass-panel">
+            <div>
+              <p class="eyebrow">mês selecionado</p>
+              <h2 id="selected-month-title">Abril 2026</h2>
+              <p id="selected-year-copy">Dados separados por ano para nada sumir quando virar o calendário.</p>
+            </div>
+            <div class="year-switcher">
+              <button class="icon-button" data-action="prev-year" aria-label="Ano anterior">‹</button>
+              <strong id="selected-year">2026</strong>
+              <button class="icon-button" data-action="next-year" aria-label="Próximo ano">›</button>
+            </div>
+          </article>
+
+          <article class="calendar-card glass-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">calendário</p>
+                <h3 id="calendar-title">Abril</h3>
+              </div>
+              <span id="today-chip" class="soft-chip">Hoje</span>
+            </div>
+            <div class="calendar-grid" id="calendar-grid"></div>
+          </article>
+        </section>
+
+        <section class="month-tabs glass-panel" id="month-tabs" aria-label="Meses do ano"></section>
+
+        <section class="summary-strip" id="summary-strip"></section>
+
+        <section class="content-grid">
+          <article class="glass-panel month-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">renda</p>
+                <h3>Salário e extras do mês</h3>
+              </div>
+              <span class="soft-chip" id="income-status">R$ 0,00</span>
+            </div>
+            <form class="form-grid" id="income-form">
+              <label>
+                Salário base
+                <input id="base-salary" type="number" min="0" step="0.01" placeholder="Ex: 2500" />
+              </label>
+              <button class="primary-button" type="submit">Salvar renda</button>
+            </form>
+            <form class="form-grid" id="extra-form">
+              <label>
+                Extra
+                <input id="extra-name" type="text" placeholder="Ex: freela, venda, bônus" required />
+              </label>
+              <label>
+                Valor
+                <input id="extra-value" type="number" min="0" step="0.01" placeholder="0,00" required />
+              </label>
+              <button class="primary-button" type="submit">Adicionar extra</button>
+            </form>
+            <div class="item-list padded" id="extras-list"></div>
+          </article>
+
+          <article class="glass-panel month-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">contas manuais</p>
+                <h3>Adicionar conta neste mês</h3>
+              </div>
+            </div>
+            <form class="form-grid" id="bill-form">
+              <label>
+                Nome da conta
+                <input id="bill-name" type="text" placeholder="Ex: Mercado, remédio, internet" required />
+              </label>
+              <label>
+                Valor
+                <input id="bill-value" type="number" min="0" step="0.01" placeholder="0,00" required />
+              </label>
+              <label>
+                Vencimento
+                <input id="bill-day" type="number" min="1" max="31" placeholder="Dia" required />
+              </label>
+              <button class="primary-button" type="submit">Adicionar conta</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="list-layout">
+          <article class="glass-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">mês</p>
+                <h3>Contas para pagar</h3>
+              </div>
+              <span class="soft-chip" id="bill-count">0 itens</span>
+            </div>
+            <div class="item-list" id="month-items"></div>
+          </article>
+
+          <aside class="glass-panel insight-panel">
+            <p class="eyebrow">resultado</p>
+            <h3 id="month-leftover">R$ 0,00</h3>
+            <p>Sobra prevista depois de salário, extras, assinaturas, caixas recorrentes, crédito e contas manuais.</p>
+            <div class="mini-ledger" id="mini-ledger"></div>
+          </aside>
+        </section>
+      </section>
+
+      <section class="view" id="subscriptions-view">
+        <article class="glass-panel wide-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">automático</p>
+              <h2>Assinaturas</h2>
+              <p>Cadastre uma vez e elas aparecem automaticamente em todos os meses.</p>
+            </div>
+          </div>
+          <form class="form-grid four" id="subscription-form">
+            <label>
+              Nome
+              <input id="subscription-name" type="text" placeholder="Ex: Spotify, Netflix" required />
+            </label>
+            <label>
+              Valor
+              <input id="subscription-value" type="number" min="0" step="0.01" placeholder="0,00" required />
+            </label>
+            <label>
+              Vencimento
+              <input id="subscription-day" type="number" min="1" max="31" placeholder="Dia" required />
+            </label>
+            <button class="primary-button" type="submit">Adicionar assinatura</button>
+          </form>
+          <div class="item-list padded" id="subscription-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="credits-view">
+        <article class="glass-panel wide-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">parcelas</p>
+              <h2>Crédito, empréstimos e compras parceladas</h2>
+              <p>Controle parcelas pagas, vencimentos e alertas de atraso. Parcelas não marcadas acumulam no mês seguinte.</p>
+            </div>
+          </div>
+          <form class="form-grid five" id="credit-form">
+            <label>
+              Nome
+              <input id="credit-name" type="text" placeholder="Ex: Empréstimo, notebook" required />
+            </label>
+            <label>
+              Valor da parcela
+              <input id="credit-value" type="number" min="0" step="0.01" placeholder="0,00" required />
+            </label>
+            <label>
+              Parcelas
+              <input id="credit-installments" type="number" min="1" step="1" placeholder="12" required />
+            </label>
+            <label>
+              Vencimento
+              <input id="credit-day" type="number" min="1" max="31" placeholder="Dia" required />
+            </label>
+            <button class="primary-button" type="submit">Adicionar crédito</button>
+          </form>
+          <div class="item-list padded" id="credit-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="templates-view">
+        <article class="glass-panel wide-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">recorrente variável</p>
+              <h2>Caixas de contas</h2>
+              <p>Crie caixas como água, energia ou mercado. Elas aparecem todo mês com valor fixo ou preenchimento manual.</p>
+            </div>
+          </div>
+          <form class="form-grid five" id="template-form">
+            <label>
+              Nome da caixa
+              <input id="template-name" type="text" placeholder="Ex: Conta de água" required />
+            </label>
+            <label>
+              Valor padrão
+              <input id="template-value" type="number" min="0" step="0.01" placeholder="Opcional" />
+            </label>
+            <label>
+              Vencimento
+              <input id="template-day" type="number" min="1" max="31" placeholder="Dia" required />
+            </label>
+            <label class="check-label">
+              <input id="template-manual" type="checkbox" />
+              Preencher manualmente por mês
+            </label>
+            <button class="primary-button" type="submit">Criar caixa</button>
+          </form>
+          <div class="item-list padded" id="template-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="settings-view">
+        <article class="glass-panel wide-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">base</p>
+              <h2>Configuração inicial</h2>
+              <p>Defina o salário base e gerencie os dados salvos neste navegador.</p>
+            </div>
+          </div>
+          <form class="form-grid" id="settings-form">
+            <label>
+              Salário mensal padrão
+              <input id="settings-salary" type="number" min="0" step="0.01" placeholder="Ex: 2500" />
+            </label>
+            <button class="primary-button" type="submit">Salvar configuração</button>
+            <button class="danger-button" type="button" data-action="reset-data">Apagar tudo</button>
+          </form>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
