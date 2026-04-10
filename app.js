@@ -22,6 +22,7 @@ const today = new Date();
 let selectedYear = today.getFullYear();
 let selectedMonth = today.getMonth();
 let activeView = "dashboard";
+let activeBillFilter = "all";
 let state = loadState();
 let dom = {};
 
@@ -264,6 +265,12 @@ function renderCalendar() {
   const firstDay = new Date(selectedYear, selectedMonth, 1).getDay();
   const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
   const isCurrentMonth = today.getFullYear() === selectedYear && today.getMonth() === selectedMonth;
+  const itemsByDay = getCurrentItems().reduce((days, item) => {
+    const day = Math.max(1, Math.min(daysInMonth, item.dueDay));
+    days[day] = days[day] || [];
+    days[day].push(item);
+    return days;
+  }, {});
 
   dom.calendarTitle.textContent = `${monthNames[selectedMonth]} ${selectedYear}`;
   dom.todayChip.textContent = isCurrentMonth ? `Hoje, dia ${today.getDate()}` : "Mês salvo";
@@ -279,7 +286,17 @@ function renderCalendar() {
 
   for (let day = 1; day <= daysInMonth; day += 1) {
     const todayClass = isCurrentMonth && today.getDate() === day ? " today" : "";
-    dom.calendarGrid.insertAdjacentHTML("beforeend", `<div class="calendar-day${todayClass}">${day}</div>`);
+    const dayItems = itemsByDay[day] || [];
+    const billClass = dayItems.length ? " has-bills" : "";
+    const overdueClass = dayItems.some((item) => item.overdue) ? " has-overdue" : "";
+    const title = dayItems.length
+      ? ` title="${dayItems.map((item) => `${item.title}: ${money(item.value)}`).join(" | ")}"`
+      : "";
+    const badge = dayItems.length ? `<span class="calendar-badge">${dayItems.length}</span>` : "";
+    dom.calendarGrid.insertAdjacentHTML(
+      "beforeend",
+      `<div class="calendar-day${todayClass}${billClass}${overdueClass}"${title}>${day}${badge}</div>`,
+    );
   }
 }
 
@@ -295,10 +312,14 @@ function renderMonthTabs() {
 function renderDashboard() {
   const summary = calculateMonth();
   const monthData = getMonthData();
+  const filteredItems = filterItems(summary.items);
 
   dom.baseSalary.value = state.settings.baseSalary || "";
   dom.incomeStatus.textContent = money(summary.income);
-  dom.billCount.textContent = `${summary.items.length} itens`;
+  dom.billCount.textContent =
+    activeBillFilter === "all"
+      ? `${summary.items.length} itens`
+      : `${filteredItems.length} de ${summary.items.length} itens`;
   dom.monthLeftover.textContent = money(summary.leftover);
 
   dom.summaryStrip.innerHTML = [
@@ -319,8 +340,13 @@ function renderDashboard() {
     .map(([label, value]) => `<div class="ledger-row"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
 
-  renderMonthItems(summary.items);
+  renderMonthItems(filteredItems, summary.items.length);
   renderExtras();
+}
+
+function filterItems(items) {
+  if (activeBillFilter === "all") return items;
+  return items.filter((item) => item.kind === activeBillFilter);
 }
 
 function renderExtras() {
@@ -348,9 +374,13 @@ function renderExtras() {
     .join("");
 }
 
-function renderMonthItems(items) {
+function renderMonthItems(items, totalItems = items.length) {
   if (!items.length) {
-    dom.monthItems.innerHTML = `<div class="empty-state">Nenhuma conta neste mês ainda. Adicione uma conta, assinatura, caixa ou crédito.</div>`;
+    const message =
+      totalItems > 0
+        ? "Nenhum item encontrado para este filtro."
+        : "Nenhuma conta neste mês ainda. Adicione uma conta, assinatura, caixa ou crédito.";
+    dom.monthItems.innerHTML = `<div class="empty-state">${message}</div>`;
     return;
   }
 
@@ -461,6 +491,7 @@ function cacheDom() {
   dom = {
     views: document.querySelectorAll(".view"),
     navPills: document.querySelectorAll(".nav-pill"),
+    filterPills: document.querySelectorAll(".filter-pill"),
     selectedMonthTitle: document.getElementById("selected-month-title"),
     selectedYear: document.getElementById("selected-year"),
     selectedYearCopy: document.getElementById("selected-year-copy"),
@@ -516,6 +547,14 @@ function togglePaid(kind, id, creditId, installmentIndex) {
 function bindEvents() {
   dom.navPills.forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.viewTarget));
+  });
+
+  dom.filterPills.forEach((button) => {
+    button.addEventListener("click", () => {
+      activeBillFilter = button.dataset.filter;
+      dom.filterPills.forEach((item) => item.classList.toggle("active", item === button));
+      renderDashboard();
+    });
   });
 
   document.addEventListener("click", (event) => {

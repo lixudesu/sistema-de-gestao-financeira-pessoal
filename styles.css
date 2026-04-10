@@ -308,6 +308,10 @@ h3 {
   background: rgba(255, 255, 255, 0.55);
 }
 
+.count-chip {
+  margin: -8px 0 16px;
+}
+
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -330,14 +334,46 @@ h3 {
 }
 
 .calendar-day {
+  position: relative;
   border: 1px solid rgba(255, 255, 255, 0.58);
   background: rgba(255, 255, 255, 0.36);
+}
+
+.calendar-day.has-bills {
+  border-color: rgba(27, 185, 214, 0.42);
+  background:
+    radial-gradient(circle at 50% 82%, rgba(27, 185, 214, 0.28), transparent 22%),
+    rgba(255, 255, 255, 0.5);
+}
+
+.calendar-day.has-overdue {
+  border-color: rgba(239, 71, 111, 0.48);
 }
 
 .calendar-day.today {
   color: white;
   background: linear-gradient(135deg, #178ecc, #50ddb7);
   box-shadow: 0 8px 22px rgba(20, 153, 194, 0.24);
+}
+
+.calendar-badge {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: white;
+  font-size: 0.67rem;
+  font-weight: 900;
+  line-height: 18px;
+  background: linear-gradient(135deg, #1397d5, #40d6b2);
+  box-shadow: 0 8px 14px rgba(19, 151, 213, 0.25);
+}
+
+.calendar-day.has-overdue .calendar-badge {
+  background: linear-gradient(135deg, #ef476f, #ff9f43);
 }
 
 .month-tabs {
@@ -362,6 +398,32 @@ h3 {
   color: white;
   background: linear-gradient(135deg, #208dd8, #5bddb9);
   transform: translateY(-2px);
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.filter-pill {
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 999px;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition: 180ms ease;
+}
+
+.filter-pill:hover,
+.filter-pill.active {
+  color: white;
+  background: linear-gradient(135deg, #208dd8, #5bddb9);
+  transform: translateY(-1px);
 }
 
 .summary-strip {

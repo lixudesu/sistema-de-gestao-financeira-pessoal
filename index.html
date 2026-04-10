@@ -126,8 +126,15 @@
                 <p class="eyebrow">mês</p>
                 <h3>Contas para pagar</h3>
               </div>
-              <span class="soft-chip" id="bill-count">0 itens</span>
+              <div class="filter-group" aria-label="Filtrar contas">
+                <button class="filter-pill active" data-filter="all">Tudo</button>
+                <button class="filter-pill" data-filter="subscription">Assinaturas</button>
+                <button class="filter-pill" data-filter="credit">Crédito</button>
+                <button class="filter-pill" data-filter="template">Caixas</button>
+                <button class="filter-pill" data-filter="bill">Contas</button>
+              </div>
             </div>
+            <span class="soft-chip count-chip" id="bill-count">0 itens</span>
             <div class="item-list" id="month-items"></div>
           </article>
 
