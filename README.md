@@ -4,7 +4,7 @@ Site local para organizar contas do mês, salário, extras, assinaturas, crédit
 
 ## Preview
 
-![Preview do SF Sistema de Organização Financeira](assets/preview.png)
+[Preview do SF Sistema de Organização Financeira](assets/preview.png)
 
 ## Como abrir
 
