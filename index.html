@@ -27,8 +27,10 @@
         <nav class="nav-pills" aria-label="Navegação principal">
           <button class="nav-pill active" data-view-target="dashboard">Início</button>
           <button class="nav-pill" data-view-target="subscriptions">Assinaturas</button>
+          <button class="nav-pill" data-view-target="charges">Cobranças</button>
           <button class="nav-pill" data-view-target="credits">Crédito</button>
           <button class="nav-pill" data-view-target="templates">Caixas</button>
+          <button class="nav-pill" data-view-target="annual">Resultado Anual</button>
           <button class="nav-pill" data-view-target="settings">Configuração</button>
         </nav>
       </header>
@@ -57,6 +59,7 @@
               <span id="today-chip" class="soft-chip">Hoje</span>
             </div>
             <div class="calendar-grid" id="calendar-grid"></div>
+            <div class="calendar-popover" id="calendar-popover" hidden></div>
           </article>
         </section>
 
@@ -75,10 +78,11 @@
             </div>
             <form class="form-grid" id="income-form">
               <label>
-                Salário base
+                Salário deste mês
                 <input id="base-salary" type="number" min="0" step="0.01" placeholder="Ex: 2500" />
               </label>
-              <button class="primary-button" type="submit">Salvar renda</button>
+              <button class="primary-button" type="submit">Salvar salário</button>
+              <button class="small-action" type="button" data-action="use-default-salary">Usar padrão</button>
             </form>
             <form class="form-grid" id="extra-form">
               <label>
@@ -131,6 +135,7 @@
                 <button class="filter-pill" data-filter="subscription">Assinaturas</button>
                 <button class="filter-pill" data-filter="credit">Crédito</button>
                 <button class="filter-pill" data-filter="template">Caixas</button>
+                <button class="filter-pill" data-filter="charge">Cobranças</button>
                 <button class="filter-pill" data-filter="bill">Contas</button>
               </div>
             </div>
@@ -145,6 +150,8 @@
             <div class="mini-ledger" id="mini-ledger"></div>
           </aside>
         </section>
+
+        <section class="category-breakdown" id="monthly-category-breakdown"></section>
       </section>
 
       <section class="view" id="subscriptions-view">
@@ -169,9 +176,55 @@
               Vencimento
               <input id="subscription-day" type="number" min="1" max="31" placeholder="Dia" required />
             </label>
+            <label>
+              Frequência
+              <select id="subscription-frequency">
+                <option value="monthly">Mensal</option>
+                <option value="annual">Anual</option>
+              </select>
+            </label>
             <button class="primary-button" type="submit">Adicionar assinatura</button>
           </form>
           <div class="item-list padded" id="subscription-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="charges-view">
+        <article class="glass-panel wide-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">a receber</p>
+              <h2>Cobranças</h2>
+              <p>Use para assinaturas ou contas divididas com amigos. Elas aparecem todo mês até você apagar.</p>
+            </div>
+          </div>
+          <form class="form-grid five" id="charge-form">
+            <label>
+              Nome
+              <input id="charge-name" type="text" placeholder="Ex: Ana, João" required />
+            </label>
+            <label>
+              Descrição
+              <input id="charge-description" type="text" placeholder="Ex: metade do Spotify" required />
+            </label>
+            <label>
+              Valor
+              <input id="charge-value" type="number" min="0" step="0.01" placeholder="0,00" required />
+            </label>
+            <label>
+              Dia
+              <input id="charge-day" type="number" min="1" max="31" placeholder="Dia" required />
+            </label>
+            <label>
+              Frequência
+              <select id="charge-frequency">
+                <option value="monthly">Mensal</option>
+                <option value="annual">Anual</option>
+              </select>
+            </label>
+            <button class="primary-button" type="submit">Adicionar cobrança</button>
+          </form>
+          <div class="item-list padded" id="charge-list"></div>
         </article>
       </section>
 
@@ -239,18 +292,59 @@
         </article>
       </section>
 
+      <section class="view" id="annual-view">
+        <article class="glass-panel wide-panel annual-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">visão do ano</p>
+              <h2 id="annual-title">Resultado anual</h2>
+              <p id="annual-subtitle">Totais acumulados até o mês atual do ano selecionado.</p>
+            </div>
+          </div>
+
+          <section class="annual-summary" id="annual-summary"></section>
+
+          <section class="annual-visual-grid">
+            <article class="inner-glass">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">categorias</p>
+                  <h3>Distribuição dos gastos</h3>
+                </div>
+              </div>
+              <div class="pie-wrap">
+                <div class="pie-chart" id="annual-pie"></div>
+                <div class="pie-legend" id="annual-legend"></div>
+              </div>
+            </article>
+
+            <article class="inner-glass">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">mês a mês</p>
+                  <h3>Gastos por mês</h3>
+                </div>
+              </div>
+              <div class="bar-chart" id="annual-bars"></div>
+            </article>
+          </section>
+
+          <div class="item-list padded" id="annual-month-list"></div>
+        </article>
+      </section>
+
       <section class="view" id="settings-view">
         <article class="glass-panel wide-panel">
           <div class="section-heading">
             <div>
               <p class="eyebrow">base</p>
               <h2>Configuração inicial</h2>
-              <p>Defina o salário base e gerencie os dados salvos neste navegador.</p>
+              <p>Defina o salário padrão. Cada mês ainda pode ter um salário próprio se receber mais, menos ou parar de receber.</p>
             </div>
           </div>
           <form class="form-grid" id="settings-form">
             <label>
-              Salário mensal padrão
+              Salário padrão
               <input id="settings-salary" type="number" min="0" step="0.01" placeholder="Ex: 2500" />
             </label>
             <button class="primary-button" type="submit">Salvar configuração</button>
