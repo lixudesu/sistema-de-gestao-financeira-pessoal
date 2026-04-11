@@ -36,6 +36,7 @@ Os dados ficam no `localStorage` do navegador. Isso significa que:
 - os dados continuam salvos ao fechar e abrir o site;
 - limpar os dados do navegador pode apagar as informações;
 - os anos ficam separados, então mudar de ano não apaga o ano anterior.
+- Adicionei um opção de backup nas configurações, você pode exportar e importar.
 
 ## Arquivos
 
