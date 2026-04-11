@@ -736,6 +736,19 @@ input:focus {
   align-self: end;
 }
 
+#settings-form .small-action {
+  min-height: 52px;
+  padding: 0 20px;
+  align-self: end;
+}
+
+.settings-note {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
 .list-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);

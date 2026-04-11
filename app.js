@@ -61,8 +61,45 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function normalizeImportedState(payload) {
+  const base = createDefaultState();
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Arquivo de backup inválido.");
+  }
+
+  const years = payload.years && typeof payload.years === "object" ? payload.years : {};
+
+  return {
+    ...base,
+    ...payload,
+    settings: {
+      ...base.settings,
+      ...(payload.settings && typeof payload.settings === "object" ? payload.settings : {}),
+    },
+    years,
+    subscriptions: Array.isArray(payload.subscriptions) ? payload.subscriptions : [],
+    charges: Array.isArray(payload.charges) ? payload.charges : [],
+    templates: Array.isArray(payload.templates) ? payload.templates : [],
+    credits: Array.isArray(payload.credits) ? payload.credits : [],
+  };
+}
+
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function exportBackup() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `sf-backup-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function money(value) {
@@ -885,6 +922,7 @@ function cacheDom() {
     annualBars: document.getElementById("annual-bars"),
     annualMonthList: document.getElementById("annual-month-list"),
     settingsSalary: document.getElementById("settings-salary"),
+    backupFileInput: document.getElementById("backup-file-input"),
   };
 }
 
@@ -1060,6 +1098,14 @@ function bindEvents() {
       saveState();
       render();
     }
+
+    if (action === "export-backup") {
+      exportBackup();
+    }
+
+    if (action === "import-backup") {
+      dom.backupFileInput.click();
+    }
   });
 
   dom.calendarGrid.addEventListener("mouseover", (event) => {
@@ -1115,6 +1161,24 @@ function bindEvents() {
     saveState();
     setView("dashboard");
     render();
+  });
+
+  dom.backupFileInput.addEventListener("change", async (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      state = normalizeImportedState(parsed);
+      saveState();
+      render();
+      alert("Backup importado com sucesso.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível importar o backup.");
+    } finally {
+      event.target.value = "";
+    }
   });
 
   document.getElementById("bill-form").addEventListener("submit", (event) => {
