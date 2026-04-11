@@ -27,10 +27,10 @@
         <nav class="nav-pills" aria-label="Navegação principal">
           <button class="nav-pill active" data-view-target="dashboard">Início</button>
           <button class="nav-pill" data-view-target="subscriptions">Assinaturas</button>
-          <button class="nav-pill" data-view-target="charges">Cobranças</button>
+          <button class="nav-pill" data-view-target="charges">A Receber</button>
           <button class="nav-pill" data-view-target="credits">Crédito</button>
-          <button class="nav-pill" data-view-target="templates">Caixas</button>
-          <button class="nav-pill" data-view-target="annual">Resultado Anual</button>
+          <button class="nav-pill" data-view-target="templates">Contas fixas</button>
+          <button class="nav-pill" data-view-target="annual">Resultado Geral</button>
           <button class="nav-pill" data-view-target="settings">Configuração</button>
         </nav>
       </header>
@@ -101,7 +101,7 @@
           <article class="glass-panel month-panel">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">contas manuais</p>
+                <p class="eyebrow">contas avulsas</p>
                 <h3>Adicionar conta neste mês</h3>
               </div>
             </div>
@@ -134,24 +134,36 @@
                 <button class="filter-pill active" data-filter="all">Tudo</button>
                 <button class="filter-pill" data-filter="subscription">Assinaturas</button>
                 <button class="filter-pill" data-filter="credit">Crédito</button>
-                <button class="filter-pill" data-filter="template">Caixas</button>
-                <button class="filter-pill" data-filter="charge">Cobranças</button>
-                <button class="filter-pill" data-filter="bill">Contas</button>
+                <button class="filter-pill" data-filter="template">Contas fixas</button>
+                <button class="filter-pill" data-filter="bill">Contas avulsas</button>
               </div>
             </div>
             <span class="soft-chip count-chip" id="bill-count">0 itens</span>
             <div class="item-list" id="month-items"></div>
           </article>
 
-          <aside class="glass-panel insight-panel">
-            <p class="eyebrow">resultado</p>
-            <h3 id="month-leftover">R$ 0,00</h3>
-            <p>Sobra prevista depois de salário, extras, assinaturas, caixas recorrentes, crédito e contas manuais.</p>
-            <div class="mini-ledger" id="mini-ledger"></div>
-          </aside>
+          <article class="glass-panel insight-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">mês</p>
+                <h3>A receber</h3>
+              </div>
+            </div>
+            <span class="soft-chip count-chip" id="receivable-count">0 itens</span>
+            <div class="item-list" id="receivable-items"></div>
+          </article>
         </section>
 
         <section class="category-breakdown" id="monthly-category-breakdown"></section>
+
+        <section class="month-result-layout">
+          <article class="glass-panel insight-panel month-result-panel">
+            <p class="eyebrow">resultado do mês</p>
+            <h3 id="month-leftover">R$ 0,00</h3>
+            <p id="month-result-description">Resumo do que entrou, foi pago e ainda ficou em aberto neste mês.</p>
+            <div class="mini-ledger" id="mini-ledger"></div>
+          </article>
+        </section>
       </section>
 
       <section class="view" id="subscriptions-view">
@@ -163,7 +175,7 @@
               <p>Cadastre uma vez e elas aparecem automaticamente em todos os meses.</p>
             </div>
           </div>
-          <form class="form-grid four" id="subscription-form">
+          <form class="form-grid subscription-grid" id="subscription-form">
             <label>
               Nome
               <input id="subscription-name" type="text" placeholder="Ex: Spotify, Netflix" required />
@@ -183,6 +195,10 @@
                 <option value="annual">Anual</option>
               </select>
             </label>
+            <label id="subscription-month-wrap" class="is-hidden">
+              Mês
+              <select id="subscription-month"></select>
+            </label>
             <button class="primary-button" type="submit">Adicionar assinatura</button>
           </form>
           <div class="item-list padded" id="subscription-list"></div>
@@ -194,11 +210,11 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">a receber</p>
-              <h2>Cobranças</h2>
-              <p>Use para assinaturas ou contas divididas com amigos. Elas aparecem todo mês até você apagar.</p>
+              <h2>A receber</h2>
+              <p>Use para valores que outras pessoas precisam te pagar. Eles aparecem todo mês até você apagar.</p>
             </div>
           </div>
-          <form class="form-grid five" id="charge-form">
+          <form class="form-grid charge-grid" id="charge-form">
             <label>
               Nome
               <input id="charge-name" type="text" placeholder="Ex: Ana, João" required />
@@ -220,9 +236,14 @@
               <select id="charge-frequency">
                 <option value="monthly">Mensal</option>
                 <option value="annual">Anual</option>
+                <option value="once">1 vez</option>
               </select>
             </label>
-            <button class="primary-button" type="submit">Adicionar cobrança</button>
+            <label id="charge-month-wrap" class="is-hidden">
+              Mês
+              <select id="charge-month"></select>
+            </label>
+            <button class="primary-button" type="submit">Adicionar item</button>
           </form>
           <div class="item-list padded" id="charge-list"></div>
         </article>
@@ -264,15 +285,15 @@
         <article class="glass-panel wide-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">recorrente variável</p>
-              <h2>Caixas de contas</h2>
-              <p>Crie caixas como água, energia ou mercado. Elas aparecem todo mês com valor fixo ou preenchimento manual.</p>
+              <p class="eyebrow">recorrente e previsível</p>
+              <h2>Contas fixas</h2>
+              <p>Cadastre internet, plano de saúde e outras contas recorrentes. Se variam, deixe para preencher manualmente por mês.</p>
             </div>
           </div>
           <form class="form-grid five" id="template-form">
             <label>
-              Nome da caixa
-              <input id="template-name" type="text" placeholder="Ex: Conta de água" required />
+              Nome da conta fixa
+              <input id="template-name" type="text" placeholder="Ex: Internet, plano de saúde" required />
             </label>
             <label>
               Valor padrão
@@ -286,7 +307,7 @@
               <input id="template-manual" type="checkbox" />
               Preencher manualmente por mês
             </label>
-            <button class="primary-button" type="submit">Criar caixa</button>
+            <button class="primary-button" type="submit">Criar conta fixa</button>
           </form>
           <div class="item-list padded" id="template-list"></div>
         </article>
@@ -296,20 +317,21 @@
         <article class="glass-panel wide-panel annual-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">visão do ano</p>
-              <h2 id="annual-title">Resultado anual</h2>
-              <p id="annual-subtitle">Totais acumulados até o mês atual do ano selecionado.</p>
+              <p class="eyebrow">visão geral</p>
+              <h2 id="annual-title">Resultado geral</h2>
+              <p id="annual-subtitle">Uma visão mais completa do que entrou, saiu, foi pago e ainda falta receber.</p>
             </div>
           </div>
 
           <section class="annual-summary" id="annual-summary"></section>
+          <section class="annual-summary secondary-summary" id="general-extra-summary"></section>
 
           <section class="annual-visual-grid">
             <article class="inner-glass">
               <div class="section-heading compact">
                 <div>
                   <p class="eyebrow">categorias</p>
-                  <h3>Distribuição dos gastos</h3>
+                  <h3>Distribuição geral</h3>
                 </div>
               </div>
               <div class="pie-wrap">
@@ -321,8 +343,8 @@
             <article class="inner-glass">
               <div class="section-heading compact">
                 <div>
-                  <p class="eyebrow">mês a mês</p>
-                  <h3>Gastos por mês</h3>
+                  <p class="eyebrow">ano selecionado</p>
+                  <h3>Movimento por mês</h3>
                 </div>
               </div>
               <div class="bar-chart" id="annual-bars"></div>
@@ -357,6 +379,55 @@
         </article>
       </section>
     </main>
+
+    <dialog class="edit-dialog" id="recurring-edit-dialog">
+      <form method="dialog" class="edit-dialog-inner" id="recurring-edit-form">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">editar</p>
+            <h3 id="edit-dialog-title">Editar item recorrente</h3>
+          </div>
+        </div>
+
+        <div class="form-grid charge-grid">
+          <label>
+            Nome
+            <input id="edit-name" type="text" required />
+          </label>
+          <label id="edit-description-wrap">
+            Descrição
+            <input id="edit-description" type="text" />
+          </label>
+          <label>
+            Valor
+            <input id="edit-value" type="number" min="0" step="0.01" required />
+          </label>
+          <label>
+            Frequência
+            <select id="edit-frequency">
+              <option value="monthly">Mensal</option>
+              <option value="annual">Anual</option>
+              <option value="once">1 vez</option>
+            </select>
+          </label>
+          <label id="edit-month-wrap" class="is-hidden">
+            Mês
+            <select id="edit-month"></select>
+          </label>
+          <label>
+            Dia
+            <input id="edit-day" type="number" min="1" max="31" required />
+          </label>
+        </div>
+
+        <p class="settings-note">A edição vale a partir de <strong id="edit-effective-month">Abril 2026</strong> e não altera os meses anteriores.</p>
+
+        <div class="dialog-actions">
+          <button class="small-action" type="button" id="edit-cancel">Cancelar</button>
+          <button class="primary-button" type="submit">Salvar edição</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="app.js"></script>
   </body>

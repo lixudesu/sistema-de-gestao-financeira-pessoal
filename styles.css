@@ -513,8 +513,12 @@ h3 {
 }
 
 .annual-summary {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin: 18px 0;
+}
+
+.secondary-summary {
+  margin-top: 0;
 }
 
 .category-card,
@@ -592,8 +596,7 @@ h3 {
   gap: 12px;
 }
 
-.legend-row,
-.annual-month-row {
+.legend-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 10px;
@@ -649,11 +652,33 @@ h3 {
 }
 
 .annual-month-row {
-  grid-template-columns: 1.1fr repeat(3, 1fr);
-  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.25fr) repeat(5, minmax(100px, 1fr));
+  gap: 14px;
+  padding: 16px 18px;
   border-radius: var(--radius-md);
   color: var(--muted);
   font-weight: 800;
+}
+
+.annual-month-main,
+.annual-month-stat {
+  display: grid;
+  gap: 6px;
+}
+
+.annual-month-main strong,
+.annual-month-stat strong {
+  color: var(--ink);
+}
+
+.annual-month-main small,
+.annual-month-stat span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .annual-month-row strong {
@@ -684,6 +709,18 @@ h3 {
   grid-template-columns: 1.4fr 1fr 0.9fr 0.8fr auto;
 }
 
+.form-grid.subscription-grid {
+  grid-template-columns: 1.2fr 0.9fr 0.7fr 0.8fr 0.8fr auto;
+}
+
+.form-grid.charge-grid {
+  grid-template-columns: 1.1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.7fr auto;
+}
+
+.is-hidden {
+  display: none;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -704,6 +741,10 @@ select {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.62);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+select {
+  appearance: none;
 }
 
 input:focus {
@@ -749,10 +790,42 @@ input:focus {
   line-height: 1.55;
 }
 
+.edit-dialog {
+  width: min(860px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(232, 250, 255, 0.76)),
+    rgba(255, 255, 255, 0.82);
+  box-shadow: 0 26px 80px rgba(39, 101, 129, 0.2);
+  backdrop-filter: blur(28px) saturate(1.2);
+}
+
+.edit-dialog::backdrop {
+  background: rgba(11, 35, 51, 0.22);
+  backdrop-filter: blur(8px);
+}
+
+.edit-dialog-inner {
+  padding: 24px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
 .list-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+  margin-top: 18px;
+}
+
+.month-result-layout {
   margin-top: 18px;
 }
 
@@ -814,6 +887,10 @@ input:focus {
 .insight-panel {
   align-self: start;
   min-height: 320px;
+}
+
+.month-result-panel {
+  min-height: auto;
 }
 
 .insight-panel h3 {
@@ -909,6 +986,14 @@ input:focus {
   .annual-summary,
   .annual-visual-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .annual-month-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .annual-month-main {
+    grid-column: 1 / -1;
   }
 
   .pie-wrap {
