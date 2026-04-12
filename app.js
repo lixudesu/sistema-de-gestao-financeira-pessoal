@@ -21,7 +21,7 @@ const categoryConfig = {
   subscription: { label: "Assinaturas", color: "#1bb9d6" },
   credit: { label: "Crédito", color: "#4178ff" },
   template: { label: "Contas fixas", color: "#67e6b7" },
-  bill: { label: "Contas avulsas", color: "#ff9f43" },
+  bill: { label: "Contas do mês", color: "#ff9f43" },
   charge: { label: "A receber", color: "#9b5cff" },
 };
 const today = new Date();
@@ -588,7 +588,7 @@ function getItemsForMonth(year, month, options = {}) {
       dueDay: bill.dueDay,
       paid: Boolean(bill.paid),
       overdue: !bill.paid && isOccurrenceOverdue(year, month, bill.dueDay),
-      meta: "Conta avulsa deste mês",
+      meta: "Conta do mês",
     });
   });
 
@@ -964,7 +964,7 @@ function renderDashboard() {
     ["Receita do mês", money(summary.income)],
     ["Assinaturas pagas", money(summary.categories.subscription.paid)],
     ["Contas fixas pagas", money(summary.categories.template.paid)],
-    ["Contas avulsas pagas", money(summary.categories.bill.paid)],
+    ["Contas do mês pagas", money(summary.categories.bill.paid)],
     ["Total geral pago no mês", money(summary.paid)],
   ]
     .map(([label, value]) => `<div class="ledger-row"><span>${label}</span><strong>${value}</strong></div>`)
@@ -1075,7 +1075,7 @@ function renderMonthItems(items, totalItems = items.length) {
     const message =
       totalItems > 0
         ? "Nenhum item encontrado para este filtro."
-        : "Nenhuma conta neste mês ainda. Adicione uma conta avulsa, assinatura, conta fixa ou crédito.";
+        : "Nenhuma conta neste mês ainda. Adicione uma conta do mês, assinatura, conta fixa ou crédito.";
     dom.monthItems.innerHTML = `<div class="empty-state">${message}</div>`;
     dom.monthItemsToggle.hidden = true;
     return;
