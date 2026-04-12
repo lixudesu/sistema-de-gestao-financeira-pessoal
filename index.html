@@ -30,7 +30,7 @@
           <button class="nav-pill" data-view-target="charges">A Receber</button>
           <button class="nav-pill" data-view-target="credits">Crédito</button>
           <button class="nav-pill" data-view-target="templates">Contas fixas</button>
-          <button class="nav-pill" data-view-target="annual">Resultado Geral</button>
+          <button class="nav-pill" data-view-target="annual">Resultado Anual</button>
           <button class="nav-pill" data-view-target="settings">Configuração</button>
         </nav>
       </header>
@@ -140,6 +140,7 @@
             </div>
             <span class="soft-chip count-chip" id="bill-count">0 itens</span>
             <div class="item-list" id="month-items"></div>
+            <button class="list-toggle" id="month-items-toggle" type="button" hidden>Ver mais</button>
           </article>
 
           <article class="glass-panel insight-panel">
@@ -148,9 +149,14 @@
                 <p class="eyebrow">mês</p>
                 <h3>A receber</h3>
               </div>
+              <div class="filter-group" aria-label="Filtrar a receber">
+                <button class="filter-pill active" data-receivable-filter="all">Tudo</button>
+                <button class="filter-pill" data-receivable-filter="once">Pagamento único</button>
+              </div>
             </div>
             <span class="soft-chip count-chip" id="receivable-count">0 itens</span>
             <div class="item-list" id="receivable-items"></div>
+            <button class="list-toggle" id="receivable-items-toggle" type="button" hidden>Ver mais</button>
           </article>
         </section>
 
@@ -236,7 +242,7 @@
               <select id="charge-frequency">
                 <option value="monthly">Mensal</option>
                 <option value="annual">Anual</option>
-                <option value="once">1 vez</option>
+                <option value="once">Pagamento Único</option>
               </select>
             </label>
             <label id="charge-month-wrap" class="is-hidden">
@@ -246,6 +252,15 @@
             <button class="primary-button" type="submit">Adicionar item</button>
           </form>
           <div class="item-list padded" id="charge-list"></div>
+          <div class="subsection-block">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">histórico</p>
+                <h3>Pagamentos Únicos Feitos</h3>
+              </div>
+            </div>
+            <div class="item-list padded" id="charge-paid-list"></div>
+          </div>
         </article>
       </section>
 
@@ -317,14 +332,46 @@
         <article class="glass-panel wide-panel annual-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">visão geral</p>
-              <h2 id="annual-title">Resultado geral</h2>
-              <p id="annual-subtitle">Uma visão mais completa do que entrou, saiu, foi pago e ainda falta receber.</p>
+              <p class="eyebrow">visão anual</p>
+              <h2 id="annual-title">Resultado anual</h2>
+              <p id="annual-subtitle">Uma visão do ano selecionado até o momento, com créditos mostrados como total contratado no sistema.</p>
             </div>
           </div>
 
-          <section class="annual-summary" id="annual-summary"></section>
-          <section class="annual-summary secondary-summary" id="general-extra-summary"></section>
+          <section class="annual-groups">
+            <article class="inner-glass annual-group">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">receita</p>
+                  <h3>Receita total</h3>
+                  <p class="annual-copy" id="annual-revenue-copy"></p>
+                </div>
+              </div>
+              <section class="annual-summary annual-group-grid" id="annual-revenue-summary"></section>
+            </article>
+
+            <article class="inner-glass annual-group">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">assinaturas</p>
+                  <h3>Assinaturas</h3>
+                  <p class="annual-copy" id="annual-subscription-copy"></p>
+                </div>
+              </div>
+              <section class="annual-summary annual-group-grid" id="annual-subscription-summary"></section>
+            </article>
+
+            <article class="inner-glass annual-group">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">créditos</p>
+                  <h3>Créditos</h3>
+                  <p class="annual-copy" id="annual-credit-copy"></p>
+                </div>
+              </div>
+              <section class="annual-summary annual-group-grid" id="annual-credit-summary"></section>
+            </article>
+          </section>
 
           <section class="annual-visual-grid">
             <article class="inner-glass">
@@ -407,7 +454,7 @@
             <select id="edit-frequency">
               <option value="monthly">Mensal</option>
               <option value="annual">Anual</option>
-              <option value="once">1 vez</option>
+              <option value="once">Pagamento Único</option>
             </select>
           </label>
           <label id="edit-month-wrap" class="is-hidden">
@@ -427,6 +474,25 @@
           <button class="primary-button" type="submit">Salvar edição</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog class="edit-dialog" id="pending-detail-dialog">
+      <div class="edit-dialog-inner">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">pendências</p>
+            <h3 id="pending-detail-title">Detalhes</h3>
+            <p class="annual-copy" id="pending-detail-copy"></p>
+          </div>
+        </div>
+
+        <div class="dialog-actions pending-actions" id="pending-detail-actions"></div>
+        <div class="item-list padded" id="pending-detail-list"></div>
+
+        <div class="dialog-actions">
+          <button class="small-action" type="button" id="pending-detail-close">Fechar</button>
+        </div>
+      </div>
     </dialog>
 
     <script type="module" src="app.js"></script>

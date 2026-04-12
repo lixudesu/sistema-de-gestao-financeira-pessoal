@@ -317,6 +317,38 @@ h3 {
   margin: -8px 0 16px;
 }
 
+#bill-count,
+#receivable-count {
+  display: none !important;
+}
+
+.list-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: #137b91;
+  font-size: 0.82rem;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition: 180ms ease;
+}
+
+.list-toggle:hover {
+  color: white;
+  background: linear-gradient(135deg, #208dd8, #5bddb9);
+  transform: translateY(-1px);
+}
+
+.list-toggle[hidden] {
+  display: none;
+}
+
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -517,8 +549,25 @@ h3 {
   margin: 18px 0;
 }
 
-.secondary-summary {
-  margin-top: 0;
+.annual-groups {
+  display: grid;
+  gap: 18px;
+  margin: 18px 0 20px;
+}
+
+.annual-group {
+  padding: 22px;
+}
+
+.annual-group-grid {
+  margin-bottom: 0;
+}
+
+.annual-copy {
+  max-width: 720px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .category-card,
@@ -818,6 +867,11 @@ input:focus {
   margin-top: 18px;
 }
 
+.pending-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
 .list-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -836,6 +890,10 @@ input:focus {
 
 .item-list.padded {
   margin-top: 18px;
+}
+
+.subsection-block {
+  margin-top: 26px;
 }
 
 .money-item {
@@ -861,6 +919,25 @@ input:focus {
 .item-title {
   margin: 0 0 4px;
   font-weight: 900;
+}
+
+.item-link {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 900;
+  text-align: left;
+  background: transparent;
+}
+
+.item-link:hover {
+  color: #0f8ba8;
+}
+
+.item-title.is-overdue,
+.item-link.is-overdue {
+  color: #c0365d;
 }
 
 .item-meta {
@@ -896,6 +973,11 @@ input:focus {
 .insight-panel h3 {
   margin-bottom: 12px;
   font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+.insight-panel .section-heading h3 {
+  margin-bottom: 10px;
+  font-size: 1.35rem;
 }
 
 .mini-ledger {

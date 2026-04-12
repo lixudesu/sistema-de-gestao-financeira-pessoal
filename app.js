@@ -30,10 +30,14 @@ let selectedYear = today.getFullYear();
 let selectedMonth = today.getMonth();
 let activeView = "dashboard";
 let activeBillFilter = "all";
+let activeReceivableFilter = "all";
+let showAllPayables = false;
+let showAllReceivables = false;
 let state = loadState();
 let dom = {};
 let calendarItemsByDay = {};
 let recurringEditState = null;
+let pendingDetailState = null;
 
 function createDefaultState() {
   return {
@@ -100,10 +104,28 @@ function normalizeRecurringItem(item, kind) {
 }
 
 function normalizeTemplateItem(item) {
+  let inferredStart = null;
+
+  Object.entries(state.years).forEach(([yearKey, yearData]) => {
+    Object.keys(yearData.months || {}).forEach((monthKey) => {
+      const saved = yearData.months?.[monthKey]?.templateValues?.[item.id];
+      if (!saved) return;
+      const candidate = {
+        year: Number(yearKey),
+        month: Number(monthKey),
+      };
+      if (!inferredStart || getMonthIndex(candidate.year, candidate.month) < getMonthIndex(inferredStart.year, inferredStart.month)) {
+        inferredStart = candidate;
+      }
+    });
+  });
+
   return {
     ...item,
     revisions: Array.isArray(item.revisions) ? item.revisions : [],
     manual: Boolean(item.manual),
+    startYear: Number.isInteger(item.startYear) ? item.startYear : inferredStart?.year ?? today.getFullYear(),
+    startMonth: Number.isInteger(item.startMonth) ? item.startMonth : inferredStart?.month ?? today.getMonth(),
   };
 }
 
@@ -194,8 +216,176 @@ function getMonthIndex(year, month) {
   return year * 12 + month;
 }
 
+function isOccurrenceOverdue(year, month, dueDay) {
+  const occurrenceDate = new Date(year, month, clampDay(dueDay), 23, 59, 59, 999);
+  return occurrenceDate.getTime() < today.getTime();
+}
+
 function isFutureViewMonth(year, month) {
   return getMonthIndex(year, month) > getMonthIndex(today.getFullYear(), today.getMonth());
+}
+
+function getListPriority(item) {
+  if (item.overdue) return 0;
+  if (item.recurringFrequency === "monthly") return 1;
+  if (item.kind === "template") return 2;
+  if (item.kind === "bill") return 3;
+  if (item.kind === "credit") return 4;
+  if (item.recurringFrequency === "once") return 5;
+  if (item.recurringFrequency === "annual") return 6;
+  return 7;
+}
+
+function sortMonthItems(items) {
+  return items.sort((a, b) => {
+    if (a.paid !== b.paid) return a.paid ? 1 : -1;
+    const priorityDiff = getListPriority(a) - getListPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    const dueDayDiff = numberValue(a.dueDay) - numberValue(b.dueDay);
+    if (dueDayDiff !== 0) return dueDayDiff;
+    return String(a.title).localeCompare(String(b.title), "pt-BR");
+  });
+}
+
+function getItemBaseKey(item) {
+  if (item.kind === "subscription" || item.kind === "charge" || item.kind === "template") {
+    return `${item.kind}:${item.sourceId || item.id}`;
+  }
+  if (item.kind === "credit") {
+    return `${item.kind}:${item.creditId || item.id}`;
+  }
+  if (item.kind === "bill") {
+    return `${item.kind}:${item.sourceId || item.id}`;
+  }
+  return `${item.kind}:${item.id}`;
+}
+
+function buildDisplayItems(items) {
+  const rows = [];
+  const pendingGroups = new Map();
+
+  items.forEach((item) => {
+    const shouldGroup = !item.paid && !item.staticEntry && ["subscription", "charge", "template", "credit"].includes(item.kind);
+    if (!shouldGroup) {
+      rows.push(item);
+      return;
+    }
+
+    const key = getItemBaseKey(item);
+    const group = pendingGroups.get(key) || [];
+    group.push(item);
+    pendingGroups.set(key, group);
+  });
+
+  pendingGroups.forEach((groupItems, key) => {
+    if (groupItems.length === 1) {
+      rows.push(groupItems[0]);
+      return;
+    }
+
+    const overdueCount = groupItems.filter((item) => item.overdue).length;
+    const currentCount = groupItems.length - overdueCount;
+    rows.push({
+      id: `group:${key}`,
+      group: true,
+      groupKey: key,
+      kind: groupItems[0].kind,
+      title: groupItems[0].title,
+      value: groupItems.reduce((sum, item) => sum + numberValue(item.value), 0),
+      dueDay: Math.min(...groupItems.map((item) => numberValue(item.dueDay))),
+      paid: false,
+      overdue: overdueCount > 0,
+      groupedItems: groupItems,
+      meta:
+        overdueCount > 0
+          ? `${overdueCount} atrasada${overdueCount > 1 ? "s" : ""}${currentCount ? ` • ${currentCount} atual` : ""}`
+          : `${groupItems.length} pendências deste item`,
+    });
+  });
+
+  return sortMonthItems(rows);
+}
+
+function calculateOverdueExpenses(items) {
+  return items
+    .filter((item) => item.overdue && !item.paid)
+    .reduce((sum, item) => sum + numberValue(item.value), 0);
+}
+
+function getPaidOneTimeReceivableHistory(year, month, visibleItems = []) {
+  const selectedIndex = getMonthIndex(year, month);
+  const visibleChargeKeys = new Set(
+    visibleItems
+      .filter((item) => item.kind === "charge")
+      .map((item) => `${item.sourceYear ?? year}:${item.sourceMonth ?? month}:${item.sourceId || item.id}`),
+  );
+
+  return sortMonthItems(
+    state.charges
+      .filter((charge) => (charge.frequency || "monthly") === "once")
+      .filter((charge) => getMonthIndex(charge.startYear ?? year, charge.startMonth ?? month) <= selectedIndex)
+      .map((charge) => {
+        const occurrenceYear = charge.startYear ?? year;
+        const occurrenceMonth = charge.startMonth ?? month;
+        const visibilityKey = `${occurrenceYear}:${occurrenceMonth}:${charge.id}`;
+        if (visibleChargeKeys.has(visibilityKey)) return null;
+
+        const sourceData = readMonthData(occurrenceYear, occurrenceMonth);
+        if (!sourceData?.chargePaid?.[charge.id]) return null;
+
+        const snapshot = getRecurringSnapshot(charge, occurrenceYear, occurrenceMonth);
+        return {
+          id: `paid-charge:${occurrenceYear}:${occurrenceMonth}:${charge.id}`,
+          kind: "charge",
+          recurringFrequency: "once",
+          sourceKind: "charge",
+          sourceYear: occurrenceYear,
+          sourceMonth: occurrenceMonth,
+          sourceId: charge.id,
+          title: snapshot.name,
+          value: numberValue(snapshot.value),
+          dueDay: snapshot.dueDay,
+          paid: true,
+          overdue: false,
+          meta: `Pagamento único recebido em ${monthNames[occurrenceMonth]} ${occurrenceYear} • ${snapshot.description}`,
+        };
+      })
+      .filter(Boolean),
+  );
+}
+
+function getAllPaidOneTimeCharges() {
+  return state.charges
+    .filter((charge) => (charge.frequency || "monthly") === "once")
+    .map((charge) => {
+      const occurrenceYear = charge.startYear ?? selectedYear;
+      const occurrenceMonth = charge.startMonth ?? selectedMonth;
+      const sourceData = readMonthData(occurrenceYear, occurrenceMonth);
+      if (!sourceData?.chargePaid?.[charge.id]) return null;
+
+      const snapshot = getRecurringSnapshot(charge, occurrenceYear, occurrenceMonth);
+      return {
+        id: `charge-history:${occurrenceYear}:${occurrenceMonth}:${charge.id}`,
+        kind: "charge",
+        title: snapshot.name,
+        value: numberValue(snapshot.value),
+        dueDay: snapshot.dueDay,
+        paid: true,
+        overdue: false,
+        recurringFrequency: "once",
+        sourceKind: "charge",
+        sourceYear: occurrenceYear,
+        sourceMonth: occurrenceMonth,
+        sourceId: charge.id,
+        meta: `Pagamento Único recebido em ${monthNames[occurrenceMonth]} ${occurrenceYear} • ${snapshot.description}`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const monthDiff = getMonthIndex(b.sourceYear, b.sourceMonth) - getMonthIndex(a.sourceYear, a.sourceMonth);
+      if (monthDiff !== 0) return monthDiff;
+      return String(a.title).localeCompare(String(b.title), "pt-BR");
+    });
 }
 
 function getPastMonthRefs(year, month) {
@@ -248,6 +438,8 @@ function getTemplateSnapshot(item, year, month) {
     value: numberValue(normalized.value),
     dueDay: normalized.dueDay,
     manual: normalized.manual,
+    startYear: normalized.startYear,
+    startMonth: normalized.startMonth,
   };
 
   const targetIndex = getMonthIndex(year, month);
@@ -271,10 +463,11 @@ function getRecurringOccurrenceMonths(item, targetYear, targetMonth) {
   const targetIndex = getMonthIndex(targetYear, targetMonth);
   if (targetIndex < startIndex) return [];
 
-  const occurrences = [{ year: startYear, month: startMonth }];
+  const occurrences = [];
   const frequency = normalized.frequency || "monthly";
 
   if (frequency === "monthly") {
+    occurrences.push({ year: startYear, month: startMonth });
     for (let index = startIndex + 1; index <= targetIndex; index += 1) {
       occurrences.push({ year: Math.floor(index / 12), month: index % 12 });
     }
@@ -282,11 +475,15 @@ function getRecurringOccurrenceMonths(item, targetYear, targetMonth) {
 
   if (frequency === "annual") {
     const dueMonth = normalized.dueMonth ?? startMonth;
-    let nextYear = dueMonth > startMonth ? startYear : startYear + 1;
+    let nextYear = dueMonth >= startMonth ? startYear : startYear + 1;
     while (getMonthIndex(nextYear, dueMonth) <= targetIndex) {
       occurrences.push({ year: nextYear, month: dueMonth });
       nextYear += 1;
     }
+  }
+
+  if (frequency === "once") {
+    occurrences.push({ year: startYear, month: startMonth });
   }
 
   return occurrences.filter((occurrence, index, list) => index === list.findIndex((entry) => entry.year === occurrence.year && entry.month === occurrence.month));
@@ -296,13 +493,14 @@ function upsertRecurringRevision(item, payload, year, month) {
   item.revisions = Array.isArray(item.revisions) ? item.revisions : [];
   const targetIndex = getMonthIndex(year, month);
   const startIndex = getMonthIndex(item.startYear ?? year, item.startMonth ?? month);
+  const parsedDueMonth = payload.dueMonth === "" || payload.dueMonth === null || payload.dueMonth === undefined ? null : Number(payload.dueMonth);
   const sanitized = {
     year,
     month,
     name: payload.name,
     value: numberValue(payload.value),
     dueDay: clampDay(payload.dueDay),
-    dueMonth: payload.frequency === "annual" ? Number(payload.dueMonth) : null,
+    dueMonth: payload.frequency === "annual" || payload.frequency === "once" ? parsedDueMonth : null,
     frequency: payload.frequency,
   };
 
@@ -316,6 +514,9 @@ function upsertRecurringRevision(item, payload, year, month) {
     item.dueDay = sanitized.dueDay;
     item.dueMonth = sanitized.dueMonth;
     item.frequency = sanitized.frequency;
+    if (sanitized.frequency === "once" && sanitized.dueMonth !== null) {
+      item.startMonth = sanitized.dueMonth;
+    }
     if (payload.description !== undefined) item.description = payload.description;
     return;
   }
@@ -351,7 +552,7 @@ function isCreditInstallmentPaid(credit, index) {
   return Array.isArray(credit.paid) && credit.paid.includes(index);
 }
 
-function setCreditInstallmentPaid(creditId, index, paid) {
+function setCreditInstallmentPaid(creditId, index, paid, persist = true) {
   const credit = state.credits.find((item) => item.id === creditId);
   if (!credit) return;
   credit.paid = Array.isArray(credit.paid) ? credit.paid : [];
@@ -361,8 +562,10 @@ function setCreditInstallmentPaid(creditId, index, paid) {
   if (!paid) {
     credit.paid = credit.paid.filter((item) => item !== index);
   }
-  saveState();
-  render();
+  if (persist) {
+    saveState();
+    render();
+  }
 }
 
 function getCurrentItems() {
@@ -384,6 +587,7 @@ function getItemsForMonth(year, month, options = {}) {
       value: numberValue(bill.value),
       dueDay: bill.dueDay,
       paid: Boolean(bill.paid),
+      overdue: !bill.paid && isOccurrenceOverdue(year, month, bill.dueDay),
       meta: "Conta avulsa deste mês",
     });
   });
@@ -419,6 +623,7 @@ function getItemsForMonth(year, month, options = {}) {
       items.push({
         id: isCurrentOccurrence ? subscription.id : `late-subscription:${occurrence.year}:${occurrence.month}:${subscription.id}`,
         kind: "subscription",
+        recurringFrequency: snapshot.frequency,
         sourceKind: isCurrentOccurrence ? undefined : "subscription",
         sourceYear: isCurrentOccurrence ? undefined : occurrence.year,
         sourceMonth: isCurrentOccurrence ? undefined : occurrence.month,
@@ -427,7 +632,7 @@ function getItemsForMonth(year, month, options = {}) {
         value: numberValue(snapshot.value),
         dueDay: snapshot.dueDay,
         paid: isCurrentOccurrence ? paid : false,
-        overdue: !isCurrentOccurrence,
+        overdue: !isCurrentOccurrence || (!paid && isOccurrenceOverdue(occurrence.year, occurrence.month, snapshot.dueDay)),
         meta: isCurrentOccurrence
           ? `Assinatura ${snapshot.frequency === "annual" ? `anual • ${monthNames[snapshot.dueMonth]}` : "mensal"}`
           : `Assinatura atrasada de ${monthNames[occurrence.month]} ${occurrence.year}`,
@@ -446,6 +651,7 @@ function getItemsForMonth(year, month, options = {}) {
       items.push({
         id: isCurrentOccurrence ? charge.id : `late-charge:${occurrence.year}:${occurrence.month}:${charge.id}`,
         kind: "charge",
+        recurringFrequency: snapshot.frequency,
         sourceKind: isCurrentOccurrence ? undefined : "charge",
         sourceYear: isCurrentOccurrence ? undefined : occurrence.year,
         sourceMonth: isCurrentOccurrence ? undefined : occurrence.month,
@@ -454,35 +660,42 @@ function getItemsForMonth(year, month, options = {}) {
         value: numberValue(snapshot.value),
         dueDay: snapshot.dueDay,
         paid: isCurrentOccurrence ? paid : false,
-        overdue: !isCurrentOccurrence,
+        overdue: !isCurrentOccurrence || (!paid && isOccurrenceOverdue(occurrence.year, occurrence.month, snapshot.dueDay)),
         meta: isCurrentOccurrence
-          ? `${snapshot.description} • a receber ${snapshot.frequency === "annual" ? `anual • ${monthNames[snapshot.dueMonth]}` : snapshot.frequency === "once" ? "1 vez" : "mensal"}`
+          ? `${snapshot.description} • a receber ${snapshot.frequency === "annual" ? `anual • ${monthNames[snapshot.dueMonth]}` : snapshot.frequency === "once" ? `Pagamento Único • ${monthNames[snapshot.dueMonth ?? occurrence.month]}` : "mensal"}`
           : `A receber atrasado de ${monthNames[occurrence.month]} ${occurrence.year} • ${snapshot.description}`,
       });
     });
   });
 
   state.templates.forEach((template) => {
+    const snapshot = getTemplateSnapshot(template, year, month);
+    const templateStartIndex = getMonthIndex(snapshot.startYear ?? today.getFullYear(), snapshot.startMonth ?? today.getMonth());
+    if (getMonthIndex(year, month) < templateStartIndex) return;
     const saved = monthData.templateValues[template.id] || {};
-    const value = template.manual ? numberValue(saved.value) : numberValue(saved.value ?? template.value);
+    const value = snapshot.manual ? numberValue(saved.value) : numberValue(saved.value ?? snapshot.value);
     items.push({
       id: template.id,
       kind: "template",
-      title: template.name,
+      title: snapshot.name,
       value,
-      dueDay: template.dueDay,
+      dueDay: snapshot.dueDay,
       paid: Boolean(saved.paid),
-        meta: template.manual ? "Conta fixa preenchida manualmente neste mês" : "Conta fixa com valor padrão",
-      manual: template.manual,
+      overdue: !saved.paid && isOccurrenceOverdue(year, month, snapshot.dueDay),
+      meta: snapshot.manual ? "Conta fixa preenchida manualmente neste mês" : "Conta fixa com valor padrão",
+      manual: snapshot.manual,
     });
   });
 
   pastMonths.forEach((past) => {
     state.templates.forEach((template) => {
+      const snapshot = getTemplateSnapshot(template, past.year, past.month);
+      const templateStartIndex = getMonthIndex(snapshot.startYear ?? today.getFullYear(), snapshot.startMonth ?? today.getMonth());
+      if (getMonthIndex(past.year, past.month) < templateStartIndex) return;
       const saved = past.data.templateValues?.[template.id] || {};
       if (saved.paid) return;
-      const value = template.manual ? numberValue(saved.value) : numberValue(saved.value ?? template.value);
-      if (template.manual && !value) return;
+      const value = snapshot.manual ? numberValue(saved.value) : numberValue(saved.value ?? snapshot.value);
+      if (snapshot.manual && !value) return;
       items.push({
         id: `late-template:${past.year}:${past.month}:${template.id}`,
         kind: "template",
@@ -490,9 +703,9 @@ function getItemsForMonth(year, month, options = {}) {
         sourceYear: past.year,
         sourceMonth: past.month,
         sourceId: template.id,
-        title: template.name,
+        title: snapshot.name,
         value,
-        dueDay: template.dueDay,
+        dueDay: snapshot.dueDay,
         paid: false,
         overdue: true,
         meta: `Conta fixa atrasada de ${monthNames[past.month]} ${past.year}`,
@@ -514,14 +727,14 @@ function getItemsForMonth(year, month, options = {}) {
           value: numberValue(credit.value),
           dueDay: credit.dueDay,
           paid,
-          overdue: installment.overdue,
+          overdue: installment.overdue || isOccurrenceOverdue(year, month, credit.dueDay),
           meta: `Parcela ${installment.number}/${credit.installments}${installment.overdue ? " atrasada" : ""}`,
         });
       }
     });
   });
 
-  return items.sort((a, b) => a.dueDay - b.dueDay);
+  return sortMonthItems(items);
 }
 
 function calculateMonth(year = selectedYear, month = selectedMonth, options = {}) {
@@ -540,6 +753,12 @@ function calculateMonth(year = selectedYear, month = selectedMonth, options = {}
   const chargesReceivable = items
     .filter((item) => item.kind === "charge" && !item.paid)
     .reduce((sum, item) => sum + numberValue(item.value), 0);
+  const chargesReceivableCurrent = items
+    .filter((item) => item.kind === "charge" && !item.paid && !item.overdue)
+    .reduce((sum, item) => sum + numberValue(item.value), 0);
+  const chargesReceivableOverdue = items
+    .filter((item) => item.kind === "charge" && !item.paid && item.overdue)
+    .reduce((sum, item) => sum + numberValue(item.value), 0);
   const income = baseSalary + extraIncome + chargesReceived;
   const expenseItems = items.filter((item) => item.kind !== "charge");
   const totalToPay = expenseItems.reduce((sum, item) => sum + numberValue(item.value), 0);
@@ -553,6 +772,8 @@ function calculateMonth(year = selectedYear, month = selectedMonth, options = {}
     extraIncome,
     chargesReceived,
     chargesReceivable,
+    chargesReceivableCurrent,
+    chargesReceivableOverdue,
     income,
     items,
     totalToPay,
@@ -574,6 +795,9 @@ function createCategoryTotals(items) {
         total: 0,
         paid: 0,
         pending: 0,
+        pendingCount: 0,
+        overdueCount: 0,
+        overdueTotal: 0,
       },
     ]),
   );
@@ -588,6 +812,11 @@ function createCategoryTotals(items) {
       category.paid += value;
     } else {
       category.pending += value;
+      category.pendingCount += 1;
+    }
+    if (item.overdue) {
+      category.overdueCount += 1;
+      category.overdueTotal += value;
     }
   });
 
@@ -596,6 +825,10 @@ function createCategoryTotals(items) {
 
 function setView(view) {
   activeView = view;
+  if (view !== "dashboard") {
+    showAllPayables = false;
+    showAllReceivables = false;
+  }
   dom.views.forEach((item) => {
     item.classList.toggle("active", item.id === `${view}-view`);
   });
@@ -673,8 +906,10 @@ function renderDashboard() {
   const summary = calculateMonth();
   const monthData = getMonthData();
   const payableItems = summary.items.filter((item) => item.kind !== "charge");
+  const monthReceivableItems = summary.items.filter((item) => item.kind === "charge");
+  const oneTimeReceivableHistory = getPaidOneTimeReceivableHistory(selectedYear, selectedMonth, monthReceivableItems);
   const receivableItems = [
-    ...summary.items.filter((item) => item.kind === "charge"),
+    ...monthReceivableItems,
     ...((monthData.extras || []).map((item) => ({
       id: item.id,
       kind: "extra-income",
@@ -685,10 +920,15 @@ function renderDashboard() {
       staticEntry: true,
       meta: `Extra já registrado em ${monthNames[selectedMonth]} ${selectedYear}`,
     })) || []),
-  ].sort((a, b) => a.dueDay - b.dueDay);
-  const filteredItems = filterItems(payableItems);
-  const limitedPayables = filteredItems.slice(0, 5);
-  const limitedReceivables = receivableItems.slice(0, 5);
+  ];
+  const filteredItems = buildDisplayItems(filterItems(payableItems));
+  const filteredReceivables =
+    activeReceivableFilter === "once"
+      ? buildDisplayItems(sortMonthItems([...monthReceivableItems.filter((item) => item.recurringFrequency === "once"), ...oneTimeReceivableHistory]))
+      : buildDisplayItems(sortMonthItems(receivableItems));
+  const limitedPayables = showAllPayables ? filteredItems : filteredItems.slice(0, 5);
+  const limitedReceivables = showAllReceivables ? filteredReceivables : filteredReceivables.slice(0, 5);
+  const overdueExpenseTotal = calculateOverdueExpenses(summary.items);
   const monthStatusText =
     summary.leftover > 0
       ? `Sobrou ${money(summary.leftover)} neste mês, considerando o que já entrou e o que ainda falta pagar.`
@@ -701,10 +941,8 @@ function renderDashboard() {
       ? state.settings.baseSalary || ""
       : monthData.baseSalary || "";
   dom.incomeStatus.textContent = money(summary.income);
-  dom.billCount.textContent =
-    filteredItems.length > 5 ? `5 próximas de ${filteredItems.length} contas` : `${filteredItems.length} contas`;
-  dom.receivableCount.textContent =
-    limitedReceivables.length < receivableItems.length ? `5 de ${receivableItems.length} itens` : `${receivableItems.length} itens`;
+  dom.billCount.hidden = true;
+  dom.receivableCount.hidden = true;
   dom.monthLeftover.textContent = money(summary.leftover);
   dom.monthResultDescription.textContent = monthStatusText;
 
@@ -718,8 +956,10 @@ function renderDashboard() {
     .join("");
 
   dom.miniLedger.innerHTML = [
+    ["Total de atrasados", money(overdueExpenseTotal)],
+    ["A receber deste mês", money(summary.chargesReceivableCurrent)],
+    ["A receber atrasado", money(summary.chargesReceivableOverdue)],
     ["A receber recebido", money(summary.chargesReceived)],
-    ["A receber em aberto", money(summary.chargesReceivable)],
     ["Extras", money(summary.extraIncome)],
     ["Receita do mês", money(summary.income)],
     ["Assinaturas pagas", money(summary.categories.subscription.paid)],
@@ -731,13 +971,23 @@ function renderDashboard() {
     .join("");
 
   renderMonthItems(limitedPayables, filteredItems.length);
-  renderReceivableItems(limitedReceivables, receivableItems.length);
-  renderMonthlyCategoryBreakdown(summary.categories);
+  renderReceivableItems(limitedReceivables, filteredReceivables.length);
+  renderMonthlyCategoryBreakdown(summary.categories, {
+    overdueExpenseTotal,
+    receivableUnpaidTotal: summary.chargesReceivable,
+    receivableUnpaidCount: summary.categories.charge.pendingCount,
+    overdueCount:
+      summary.categories.subscription.overdueCount +
+      summary.categories.credit.overdueCount +
+      summary.categories.template.overdueCount +
+      summary.categories.bill.overdueCount +
+      summary.categories.charge.overdueCount,
+  });
   renderExtras();
 }
 
-function renderMonthlyCategoryBreakdown(categories) {
-  dom.monthlyCategoryBreakdown.innerHTML = Object.values(categories)
+function renderMonthlyCategoryBreakdown(categories, extras = {}) {
+  const cards = Object.values(categories)
     .map(
       (category) => `
         <article class="category-card">
@@ -745,17 +995,54 @@ function renderMonthlyCategoryBreakdown(categories) {
           <div>
             <p>${category.label}</p>
             <strong>${money(category.pending)}</strong>
-            <small>${category.count} itens • ${category.key === "charge" ? "a receber" : `${money(category.total)} no total`}</small>
+            <small>${
+              category.key === "charge"
+                ? `${category.count} itens • ${money(category.total)} no total`
+                : category.overdueCount
+                  ? `${category.overdueCount} atrasados • Total de atrasados ${money(category.overdueTotal)}`
+                  : `${category.count} itens • ${money(category.total)} no total`
+            }</small>
           </div>
         </article>
       `,
-    )
-    .join("");
+    );
+
+  cards.push(`
+    <article class="category-card">
+      <span class="category-dot" style="--dot-color: #ef476f"></span>
+      <div>
+        <p>Total de atrasados</p>
+        <strong>${money(extras.overdueExpenseTotal || 0)}</strong>
+        <small>${extras.overdueCount || 0} itens atrasados</small>
+      </div>
+    </article>
+  `);
+
+  cards.push(`
+    <article class="category-card">
+      <span class="category-dot" style="--dot-color: #9b5cff"></span>
+      <div>
+        <p>A receber não pago</p>
+        <strong>${money(extras.receivableUnpaidTotal || 0)}</strong>
+        <small>${extras.receivableUnpaidCount || 0} itens não pagos</small>
+      </div>
+    </article>
+  `);
+
+  dom.monthlyCategoryBreakdown.innerHTML = cards.join("");
 }
 
 function filterItems(items) {
   if (activeBillFilter === "all") return items;
   return items.filter((item) => item.kind === activeBillFilter);
+}
+
+function filterReceivableItems(items) {
+  if (activeReceivableFilter === "all") return items;
+  if (activeReceivableFilter === "once") {
+    return items.filter((item) => item.kind === "charge" && item.recurringFrequency === "once");
+  }
+  return items;
 }
 
 function renderExtras() {
@@ -790,6 +1077,7 @@ function renderMonthItems(items, totalItems = items.length) {
         ? "Nenhum item encontrado para este filtro."
         : "Nenhuma conta neste mês ainda. Adicione uma conta avulsa, assinatura, conta fixa ou crédito.";
     dom.monthItems.innerHTML = `<div class="empty-state">${message}</div>`;
+    dom.monthItemsToggle.hidden = true;
     return;
   }
 
@@ -797,6 +1085,9 @@ function renderMonthItems(items, totalItems = items.length) {
     .map((item) => {
       const statusClass = item.overdue ? "overdue" : item.paid ? "paid" : "";
       const status = item.overdue ? "Atrasada" : item.paid ? "Paga" : "Pendente";
+      const titleMarkup = item.group
+        ? `<button class="item-link ${item.overdue ? "is-overdue" : ""}" type="button" data-action="open-pending-detail" data-group-key="${item.groupKey}" data-kind="${item.kind}">${item.title}</button>`
+        : `<p class="item-title ${item.overdue ? "is-overdue" : ""}">${item.title}</p>`;
       const templateValueInput =
         item.kind === "template" && item.manual
           ? `<input type="number" min="0" step="0.01" value="${item.value || ""}" data-action="set-template-value" data-id="${item.id}" aria-label="Valor da conta fixa ${item.title}" />`
@@ -805,21 +1096,29 @@ function renderMonthItems(items, totalItems = items.length) {
       return `
         <div class="money-item ${statusClass}">
           <div>
-            <p class="item-title">${item.title}</p>
+            ${titleMarkup}
             <p class="item-meta">${item.meta} • vence dia ${item.dueDay} • ${status}</p>
             ${templateValueInput}
           </div>
           <strong class="item-value">${money(item.value)}</strong>
           <div>
-            <button class="small-action" data-action="toggle-paid" data-kind="${item.kind}" data-id="${item.id}" data-credit-id="${item.creditId || ""}" data-index="${item.installmentIndex ?? ""}" data-source-kind="${item.sourceKind || ""}" data-source-year="${item.sourceYear ?? ""}" data-source-month="${item.sourceMonth ?? ""}" data-source-id="${item.sourceId || ""}">
+            ${
+              item.group
+                ? `<button class="small-action" data-action="open-pending-detail" data-group-key="${item.groupKey}" data-kind="${item.kind}">Detalhes</button>`
+                : `<button class="small-action" data-action="toggle-paid" data-kind="${item.kind}" data-id="${item.id}" data-credit-id="${item.creditId || ""}" data-index="${item.installmentIndex ?? ""}" data-source-kind="${item.sourceKind || ""}" data-source-year="${item.sourceYear ?? ""}" data-source-month="${item.sourceMonth ?? ""}" data-source-id="${item.sourceId || ""}">
               ${item.paid ? "Desmarcar" : "Pagar"}
-            </button>
+            </button>`
+            }
             ${item.kind === "bill" && !item.sourceKind ? `<button class="small-action delete" data-action="delete-bill" data-id="${item.id}">Excluir</button>` : ""}
           </div>
         </div>
       `;
     })
     .join("");
+
+  const hasOverflow = totalItems > 5;
+  dom.monthItemsToggle.hidden = !hasOverflow;
+  dom.monthItemsToggle.textContent = showAllPayables ? "▲ Mostrar menos" : "▼ Ver mais";
 }
 
 function renderSubscriptions() {
@@ -852,6 +1151,7 @@ function renderReceivableItems(items, totalItems = items.length) {
   if (!items.length) {
     const message = totalItems > 0 ? "Nenhum item encontrado para este período." : "Nada a receber neste mês.";
     dom.receivableItems.innerHTML = `<div class="empty-state">${message}</div>`;
+    dom.receivableItemsToggle.hidden = true;
     return;
   }
 
@@ -859,11 +1159,14 @@ function renderReceivableItems(items, totalItems = items.length) {
     .map((item) => {
       const statusClass = item.overdue ? "overdue" : item.paid ? "paid" : "";
       const status = item.overdue ? "Atrasado" : item.paid ? "Recebido" : "Pendente";
+      const titleMarkup = item.group
+        ? `<button class="item-link ${item.overdue ? "is-overdue" : ""}" type="button" data-action="open-pending-detail" data-group-key="${item.groupKey}" data-kind="${item.kind}">${item.title}</button>`
+        : `<p class="item-title ${item.overdue ? "is-overdue" : ""}">${item.title}</p>`;
 
       return `
         <div class="money-item ${statusClass}">
           <div>
-            <p class="item-title">${item.title}</p>
+            ${titleMarkup}
             <p class="item-meta">${item.meta}${item.staticEntry ? "" : ` • dia ${item.dueDay}`} • ${status}</p>
           </div>
           <strong class="item-value">${money(item.value)}</strong>
@@ -871,6 +1174,8 @@ function renderReceivableItems(items, totalItems = items.length) {
             ${
               item.staticEntry
                 ? `<span class="soft-chip">Recebido</span>`
+                : item.group
+                  ? `<button class="small-action" data-action="open-pending-detail" data-group-key="${item.groupKey}" data-kind="${item.kind}">Detalhes</button>`
                 : `<button class="small-action" data-action="toggle-paid" data-kind="${item.kind}" data-id="${item.id}" data-source-kind="${item.sourceKind || ""}" data-source-year="${item.sourceYear ?? ""}" data-source-month="${item.sourceMonth ?? ""}" data-source-id="${item.sourceId || ""}">
               ${item.paid ? "Desmarcar" : "Receber"}
             </button>`
@@ -880,11 +1185,16 @@ function renderReceivableItems(items, totalItems = items.length) {
       `;
     })
     .join("");
+
+  const hasOverflow = totalItems > 5;
+  dom.receivableItemsToggle.hidden = !hasOverflow;
+  dom.receivableItemsToggle.textContent = showAllReceivables ? "▲ Mostrar menos" : "▼ Ver mais";
 }
 
 function renderCharges() {
   if (!state.charges.length) {
     dom.chargeList.innerHTML = `<div class="empty-state">Nenhum item a receber cadastrado. Use para pessoas que dividem assinatura ou conta com você.</div>`;
+    dom.chargePaidList.innerHTML = `<div class="empty-state">Nenhum pagamento único recebido ainda.</div>`;
     return;
   }
 
@@ -895,7 +1205,7 @@ function renderCharges() {
         <div class="money-item">
           <div>
             <p class="item-title">${snapshot.name}</p>
-            <p class="item-meta">${snapshot.description} • a receber ${snapshot.frequency === "annual" ? `anual • ${monthNames[snapshot.dueMonth]}` : snapshot.frequency === "once" ? "1 vez" : "mensal"} • dia ${snapshot.dueDay}</p>
+            <p class="item-meta">${snapshot.description} • a receber ${snapshot.frequency === "annual" ? `anual • ${monthNames[snapshot.dueMonth]}` : snapshot.frequency === "once" ? `Pagamento Único • ${monthNames[snapshot.dueMonth ?? selectedMonth]}` : "mensal"} • dia ${snapshot.dueDay}</p>
           </div>
           <strong class="item-value">${money(snapshot.value)}</strong>
           <div>
@@ -906,6 +1216,108 @@ function renderCharges() {
       `;
     })
     .join("");
+
+  const paidOneTimeCharges = getAllPaidOneTimeCharges();
+  if (!paidOneTimeCharges.length) {
+    dom.chargePaidList.innerHTML = `<div class="empty-state">Nenhum pagamento único recebido ainda.</div>`;
+    return;
+  }
+
+  dom.chargePaidList.innerHTML = paidOneTimeCharges
+    .map(
+      (item) => `
+        <div class="money-item paid">
+          <div>
+            <p class="item-title">${item.title}</p>
+            <p class="item-meta">${item.meta} • dia ${item.dueDay}</p>
+          </div>
+          <strong class="item-value">${money(item.value)}</strong>
+          <div>
+            <button class="small-action" data-action="toggle-paid" data-kind="${item.kind}" data-id="${item.id}" data-source-kind="${item.sourceKind}" data-source-year="${item.sourceYear}" data-source-month="${item.sourceMonth}" data-source-id="${item.sourceId}">
+              Desmarcar
+            </button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function openPendingDetail(groupKey, kind) {
+  const allItems = calculateMonth().items;
+  const groupedItems = allItems.filter((item) => getItemBaseKey(item) === groupKey && !item.paid);
+  if (!groupedItems.length) return;
+
+  pendingDetailState = { groupKey, kind, items: sortMonthItems(groupedItems) };
+  const overdueItems = pendingDetailState.items.filter((item) => item.overdue);
+  const label = kind === "charge" ? "receber" : "pagar";
+
+  dom.pendingDetailTitle.textContent = pendingDetailState.items[0].title;
+  dom.pendingDetailCopy.textContent =
+    overdueItems.length > 0
+      ? `Existem ${overdueItems.length} pendência(s) atrasada(s). Você pode ${label} uma por vez ou resolver tudo.`
+      : `Você pode ${label} cada pendência separadamente.`;
+
+  dom.pendingDetailActions.innerHTML = `
+    ${overdueItems.length ? `<button class="small-action" type="button" data-action="resolve-overdue-group">${kind === "charge" ? "Receber atrasadas" : "Pagar atrasadas"}</button>` : ""}
+    <button class="primary-button" type="button" data-action="resolve-all-group">${kind === "charge" ? "Receber tudo" : "Pagar tudo"}</button>
+  `;
+
+  dom.pendingDetailList.innerHTML = pendingDetailState.items
+    .map(
+      (item) => `
+        <div class="money-item ${item.overdue ? "overdue" : ""}">
+          <div>
+            <p class="item-title ${item.overdue ? "is-overdue" : ""}">${item.title}</p>
+            <p class="item-meta">${item.meta} • vence dia ${item.dueDay} • ${item.overdue ? "Atrasado" : "Pendente"}</p>
+          </div>
+          <strong class="item-value">${money(item.value)}</strong>
+          <div>
+            <button class="small-action" type="button" data-action="resolve-single-pending" data-kind="${item.kind}" data-id="${item.id}" data-credit-id="${item.creditId || ""}" data-index="${item.installmentIndex ?? ""}" data-source-kind="${item.sourceKind || ""}" data-source-year="${item.sourceYear ?? ""}" data-source-month="${item.sourceMonth ?? ""}" data-source-id="${item.sourceId || ""}">
+              ${kind === "charge" ? "Receber" : "Pagar"}
+            </button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+
+  if (!dom.pendingDetailDialog.open) {
+    dom.pendingDetailDialog.showModal();
+  }
+}
+
+function closePendingDetail() {
+  pendingDetailState = null;
+  if (dom.pendingDetailDialog?.open) {
+    dom.pendingDetailDialog.close();
+  }
+}
+
+function refreshPendingDetail() {
+  if (!pendingDetailState) return;
+  const { groupKey, kind } = pendingDetailState;
+  const remaining = calculateMonth().items.filter((item) => getItemBaseKey(item) === groupKey && !item.paid);
+  if (!remaining.length) {
+    closePendingDetail();
+    return;
+  }
+  openPendingDetail(groupKey, kind);
+}
+
+function resolvePendingItems(items, overdueOnly = false) {
+  const targets = overdueOnly ? items.filter((item) => item.overdue) : items;
+  targets.forEach((item) => {
+    applyPaidToggle(item.kind, item.id, item.creditId, item.installmentIndex, {
+      kind: item.sourceKind,
+      year: item.sourceYear,
+      month: item.sourceMonth,
+      id: item.sourceId,
+    });
+  });
+  saveState();
+  render();
+  refreshPendingDetail();
 }
 
 function renderCredits() {
@@ -1006,10 +1418,12 @@ function getRecordedMonthRefs() {
   return refs.sort((a, b) => getMonthIndex(a.year, a.month) - getMonthIndex(b.year, b.month));
 }
 
-function calculateGeneralOverview() {
-  const monthRefs = getRecordedMonthRefs();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth();
+function calculateAnnualOverview() {
+  const months = getAnnualMonths();
+  const monthSet = new Set(months);
+  const yearEndMonth = months.length ? months[months.length - 1] : selectedMonth;
+  const yearEndIndex = getMonthIndex(selectedYear, yearEndMonth);
+  const currentIndex = getMonthIndex(today.getFullYear(), today.getMonth());
 
   let salaryTotal = 0;
   let extrasTotal = 0;
@@ -1018,12 +1432,14 @@ function calculateGeneralOverview() {
   let manualPaidTotal = 0;
   let manualPendingTotal = 0;
 
-  monthRefs.forEach(({ year, month, data }) => {
-    const monthSummary = calculateMonth(year, month, { create: false });
+  months.forEach((month) => {
+    const monthSummary = calculateMonth(selectedYear, month, { create: false });
+    const data = readMonthData(selectedYear, month);
+
     salaryTotal += monthSummary.baseSalary;
     extrasTotal += monthSummary.extraIncome;
 
-    (data.bills || []).forEach((bill) => {
+    (data?.bills || []).forEach((bill) => {
       if (bill.paid) {
         manualPaidTotal += numberValue(bill.value);
       } else {
@@ -1032,9 +1448,9 @@ function calculateGeneralOverview() {
     });
 
     state.templates.forEach((item) => {
-      const snapshot = getTemplateSnapshot(item, year, month);
-      const saved = data.templateValues?.[item.id];
-      const value = snapshot.manual ? numberValue(saved.value) : numberValue(saved.value ?? snapshot.value);
+      const snapshot = getTemplateSnapshot(item, selectedYear, month);
+      const saved = data?.templateValues?.[item.id];
+      const value = snapshot.manual ? numberValue(saved?.value) : numberValue(saved?.value ?? snapshot.value);
       if (snapshot.manual && !value) return;
       if (saved?.paid) {
         fixedPaidTotal += value;
@@ -1044,35 +1460,37 @@ function calculateGeneralOverview() {
     });
   });
 
-  const recurringTotals = {
-    subscriptionsPaidTotal: 0,
-    subscriptionsPendingTotal: 0,
-    chargesReceivedTotal: 0,
-    chargesReceivableTotal: 0,
-  };
+  let subscriptionsPaidTotal = 0;
+  let subscriptionsPendingTotal = 0;
+  let chargesReceivedTotal = 0;
+  let chargesReceivableTotal = 0;
 
   state.subscriptions.forEach((item) => {
-    getRecurringOccurrenceMonths(item, currentYear, currentMonth).forEach((occurrence) => {
-      const monthData = readMonthData(occurrence.year, occurrence.month);
-      const snapshot = getRecurringSnapshot(item, occurrence.year, occurrence.month);
-      if (monthData?.subscriptionPaid?.[item.id]) {
-        recurringTotals.subscriptionsPaidTotal += numberValue(snapshot.value);
-      } else {
-        recurringTotals.subscriptionsPendingTotal += numberValue(snapshot.value);
-      }
-    });
+    getRecurringOccurrenceMonths(item, selectedYear, yearEndMonth)
+      .filter((occurrence) => occurrence.year === selectedYear && monthSet.has(occurrence.month))
+      .forEach((occurrence) => {
+        const monthData = readMonthData(occurrence.year, occurrence.month);
+        const snapshot = getRecurringSnapshot(item, occurrence.year, occurrence.month);
+        if (monthData?.subscriptionPaid?.[item.id]) {
+          subscriptionsPaidTotal += numberValue(snapshot.value);
+        } else {
+          subscriptionsPendingTotal += numberValue(snapshot.value);
+        }
+      });
   });
 
   state.charges.forEach((item) => {
-    getRecurringOccurrenceMonths(item, currentYear, currentMonth).forEach((occurrence) => {
-      const monthData = readMonthData(occurrence.year, occurrence.month);
-      const snapshot = getRecurringSnapshot(item, occurrence.year, occurrence.month);
-      if (monthData?.chargePaid?.[item.id]) {
-        recurringTotals.chargesReceivedTotal += numberValue(snapshot.value);
-      } else {
-        recurringTotals.chargesReceivableTotal += numberValue(snapshot.value);
-      }
-    });
+    getRecurringOccurrenceMonths(item, selectedYear, yearEndMonth)
+      .filter((occurrence) => occurrence.year === selectedYear && monthSet.has(occurrence.month))
+      .forEach((occurrence) => {
+        const monthData = readMonthData(occurrence.year, occurrence.month);
+        const snapshot = getRecurringSnapshot(item, occurrence.year, occurrence.month);
+        if (monthData?.chargePaid?.[item.id]) {
+          chargesReceivedTotal += numberValue(snapshot.value);
+        } else {
+          chargesReceivableTotal += numberValue(snapshot.value);
+        }
+      });
   });
 
   const creditBorrowed = state.credits.reduce((sum, credit) => sum + numberValue(credit.value) * numberValue(credit.installments), 0);
@@ -1081,20 +1499,27 @@ function calculateGeneralOverview() {
     0,
   );
   const creditRemaining = creditBorrowed - creditPaid;
-  const revenueTotal = salaryTotal + extrasTotal + recurringTotals.chargesReceivedTotal;
-  const totalPaidOut = recurringTotals.subscriptionsPaidTotal + fixedPaidTotal + manualPaidTotal + creditPaid;
-  const totalPendingToPay =
-    recurringTotals.subscriptionsPendingTotal + fixedPendingTotal + manualPendingTotal + creditRemaining;
+  const revenueTotal = salaryTotal + extrasTotal + chargesReceivedTotal;
+  const activeSubscriptions = state.subscriptions.filter((item) => getMonthIndex(item.startYear ?? today.getFullYear(), item.startMonth ?? 0) <= currentIndex);
+  const subscriptionTotalValue = activeSubscriptions.reduce(
+    (sum, item) => sum + numberValue(getRecurringSnapshot(item, today.getFullYear(), today.getMonth()).value),
+    0,
+  );
+  const subscriptionActiveCount = state.subscriptions.filter((item) => getMonthIndex(item.startYear ?? selectedYear, item.startMonth ?? 0) <= yearEndIndex).length;
+  const receivableActiveCount = state.charges.filter((item) => getMonthIndex(item.startYear ?? selectedYear, item.startMonth ?? 0) <= yearEndIndex).length;
+  const totalPaidOut = subscriptionsPaidTotal + fixedPaidTotal + manualPaidTotal;
+  const totalPendingToPay = subscriptionsPendingTotal + fixedPendingTotal + manualPendingTotal;
   const overallLeft = revenueTotal - totalPaidOut;
 
   return {
+    months,
     salaryTotal,
     extrasTotal,
-    chargesReceivedTotal: recurringTotals.chargesReceivedTotal,
-    chargesReceivableTotal: recurringTotals.chargesReceivableTotal,
+    chargesReceivedTotal,
+    chargesReceivableTotal,
     revenueTotal,
-    subscriptionsPaidTotal: recurringTotals.subscriptionsPaidTotal,
-    subscriptionsPendingTotal: recurringTotals.subscriptionsPendingTotal,
+    subscriptionsPaidTotal,
+    subscriptionsPendingTotal,
     fixedPaidTotal,
     fixedPendingTotal,
     manualPaidTotal,
@@ -1102,8 +1527,9 @@ function calculateGeneralOverview() {
     creditBorrowed,
     creditPaid,
     creditRemaining,
-    subscriptionCount: state.subscriptions.length,
-    chargeCount: state.charges.length,
+    subscriptionTotalValue,
+    subscriptionActiveCount,
+    receivableActiveCount,
     templateCount: state.templates.length,
     creditCount: state.credits.length,
     totalPaidOut,
@@ -1114,7 +1540,7 @@ function calculateGeneralOverview() {
 
 function renderAnnual() {
   const annual = calculateAnnual();
-  const general = calculateGeneralOverview();
+  const annualOverview = calculateAnnualOverview();
   const monthLimit = annual.months.length;
   const maxMonthSpend = Math.max(...annual.months.map((entry) => entry.summary.totalToPay), 1);
   const categoryEntries = Object.values(annual.categories).filter((category) => category.key !== "charge");
@@ -1127,43 +1553,41 @@ function renderAnnual() {
     return `${category.color} ${start}% ${currentPercent}%`;
   });
 
-  dom.annualTitle.textContent = `Resultado geral`;
+  dom.annualTitle.textContent = `Resultado anual`;
   dom.annualSubtitle.textContent =
     selectedYear > today.getFullYear() && monthLimit === 0
-      ? `Os gráficos estão olhando ${selectedYear}, mas esse ano ainda não tem dados preenchidos.`
+      ? `O ano selecionado é ${selectedYear}, mas ainda não há dados preenchidos para esse período.`
       : selectedYear > today.getFullYear()
-        ? `Os gráficos mostram ${selectedYear} e a visão geral considera tudo que já foi registrado até agora.`
+        ? `Ano selecionado: ${selectedYear}. Receita, assinaturas e contas consideram esse ano; créditos mostram o total contratado no sistema.`
         : selectedYear === today.getFullYear()
-          ? `Os gráficos mostram ${selectedYear}, acumulado de Janeiro até ${monthNames[monthLimit - 1]}.`
-          : `Os gráficos mostram ${selectedYear}, de Janeiro até Dezembro.`;
+          ? `Ano selecionado: ${selectedYear}. O resumo considera de Janeiro até ${monthNames[monthLimit - 1]} e os créditos continuam globais.`
+          : `Ano selecionado: ${selectedYear}. O resumo considera Janeiro até Dezembro; créditos mostram o total contratado no sistema.`;
 
-  dom.annualSummary.innerHTML = [
-    ["Receita total", money(general.revenueTotal)],
-    ["Salário recebido", money(general.salaryTotal)],
-    ["Extras", money(general.extrasTotal)],
-    ["A receber recebido", money(general.chargesReceivedTotal)],
-    ["A receber em aberto", money(general.chargesReceivableTotal)],
-    ["Sobrou no geral", money(general.overallLeft)],
+  dom.annualRevenueCopy.textContent = `Tudo o que entrou no ano selecionado até agora, incluindo salário, extras e valores recebidos.`;
+  dom.annualRevenueSummary.innerHTML = [
+    ["Receita total", money(annualOverview.revenueTotal)],
+    ["Salário total recebido", money(annualOverview.salaryTotal)],
+    ["Extra total recebido", money(annualOverview.extrasTotal)],
+    ["A receber total recebido", money(annualOverview.chargesReceivedTotal)],
   ]
     .map(([label, value]) => `<article class="summary-card"><span>${label}</span><strong>${value}</strong></article>`)
     .join("");
 
-  dom.generalExtraSummary.innerHTML = [
-    ["Assinaturas pagas", money(general.subscriptionsPaidTotal)],
-    ["Assinaturas em aberto", money(general.subscriptionsPendingTotal)],
-    ["Contas fixas pagas", money(general.fixedPaidTotal)],
-    ["Contas fixas em aberto", money(general.fixedPendingTotal)],
-    ["Contas avulsas pagas", money(general.manualPaidTotal)],
-    ["Contas avulsas em aberto", money(general.manualPendingTotal)],
-    ["Gastos já pagos", money(general.totalPaidOut)],
-    ["Ainda falta pagar", money(general.totalPendingToPay)],
-    ["Crédito contratado", money(general.creditBorrowed)],
-    ["Crédito pago", money(general.creditPaid)],
-    ["Crédito restante", money(general.creditRemaining)],
-    ["Assinaturas ativas", `${general.subscriptionCount}`],
-    ["Itens a receber ativos", `${general.chargeCount}`],
-    ["Contas fixas ativas", `${general.templateCount}`],
-    ["Créditos ativos", `${general.creditCount}`],
+  dom.annualSubscriptionCopy.textContent = `Mostra o valor atual somado das assinaturas ativas no sistema e o quanto já foi pago delas no ano selecionado.`;
+  dom.annualSubscriptionSummary.innerHTML = [
+    ["Total de assinaturas", money(annualOverview.subscriptionTotalValue)],
+    ["Assinaturas total pagas", money(annualOverview.subscriptionsPaidTotal)],
+    ["Assinaturas total ativas", `${annualOverview.subscriptionActiveCount}`],
+  ]
+    .map(([label, value]) => `<article class="summary-card"><span>${label}</span><strong>${value}</strong></article>`)
+    .join("");
+
+  dom.annualCreditCopy.textContent = `Créditos ignoram o ano selecionado e mostram o total contratado no sistema inteiro, mesmo que durem vários anos.`;
+  dom.annualCreditSummary.innerHTML = [
+    ["Crédito total contratado", money(annualOverview.creditBorrowed)],
+    ["Crédito total já pago", money(annualOverview.creditPaid)],
+    ["Crédito total a pagar", money(annualOverview.creditRemaining)],
+    ["Créditos ativos", `${annualOverview.creditCount}`],
   ]
     .map(([label, value]) => `<article class="summary-card"><span>${label}</span><strong>${value}</strong></article>`)
     .join("");
@@ -1241,10 +1665,10 @@ function populateMonthSelect(select) {
   select.innerHTML = monthNames.map((month, index) => `<option value="${index}">${month}</option>`).join("");
 }
 
-function toggleAnnualMonthField(select, wrap, monthSelect) {
-  const annual = select.value === "annual";
-  wrap.classList.toggle("is-hidden", !annual);
-  if (annual && (monthSelect.value === "" || monthSelect.value === undefined)) {
+function toggleMonthField(select, wrap, monthSelect, allowOnce = false) {
+  const shouldShow = select.value === "annual" || (allowOnce && select.value === "once");
+  wrap.classList.toggle("is-hidden", !shouldShow);
+  if (shouldShow && (monthSelect.value === "" || monthSelect.value === undefined)) {
     monthSelect.value = String(selectedMonth);
   }
 }
@@ -1275,7 +1699,7 @@ function openRecurringEdit(kind, id) {
   dom.editMonth.value = String(snapshot.dueMonth ?? selectedMonth);
   dom.editDay.value = snapshot.dueDay;
   dom.editEffectiveMonth.textContent = `${monthNames[selectedMonth]} ${selectedYear}`;
-  toggleAnnualMonthField(dom.editFrequency, dom.editMonthWrap, dom.editMonth);
+  toggleMonthField(dom.editFrequency, dom.editMonthWrap, dom.editMonth, kind === "charge");
   dom.recurringEditDialog.showModal();
 }
 
@@ -1283,7 +1707,8 @@ function cacheDom() {
   dom = {
     views: document.querySelectorAll(".view"),
     navPills: document.querySelectorAll(".nav-pill"),
-    filterPills: document.querySelectorAll(".filter-pill"),
+    filterPills: document.querySelectorAll("[data-filter]"),
+    receivableFilterPills: document.querySelectorAll("[data-receivable-filter]"),
     selectedMonthTitle: document.getElementById("selected-month-title"),
     selectedYear: document.getElementById("selected-year"),
     selectedYearCopy: document.getElementById("selected-year-copy"),
@@ -1301,17 +1726,24 @@ function cacheDom() {
     summaryStrip: document.getElementById("summary-strip"),
     miniLedger: document.getElementById("mini-ledger"),
     monthItems: document.getElementById("month-items"),
+    monthItemsToggle: document.getElementById("month-items-toggle"),
     receivableItems: document.getElementById("receivable-items"),
+    receivableItemsToggle: document.getElementById("receivable-items-toggle"),
     monthlyCategoryBreakdown: document.getElementById("monthly-category-breakdown"),
     extrasList: document.getElementById("extras-list"),
     subscriptionList: document.getElementById("subscription-list"),
     chargeList: document.getElementById("charge-list"),
+    chargePaidList: document.getElementById("charge-paid-list"),
     creditList: document.getElementById("credit-list"),
     templateList: document.getElementById("template-list"),
     annualTitle: document.getElementById("annual-title"),
     annualSubtitle: document.getElementById("annual-subtitle"),
-    annualSummary: document.getElementById("annual-summary"),
-    generalExtraSummary: document.getElementById("general-extra-summary"),
+    annualRevenueCopy: document.getElementById("annual-revenue-copy"),
+    annualRevenueSummary: document.getElementById("annual-revenue-summary"),
+    annualSubscriptionCopy: document.getElementById("annual-subscription-copy"),
+    annualSubscriptionSummary: document.getElementById("annual-subscription-summary"),
+    annualCreditCopy: document.getElementById("annual-credit-copy"),
+    annualCreditSummary: document.getElementById("annual-credit-summary"),
     annualPie: document.getElementById("annual-pie"),
     annualLegend: document.getElementById("annual-legend"),
     annualBars: document.getElementById("annual-bars"),
@@ -1337,10 +1769,16 @@ function cacheDom() {
     editDay: document.getElementById("edit-day"),
     editEffectiveMonth: document.getElementById("edit-effective-month"),
     editCancel: document.getElementById("edit-cancel"),
+    pendingDetailDialog: document.getElementById("pending-detail-dialog"),
+    pendingDetailTitle: document.getElementById("pending-detail-title"),
+    pendingDetailCopy: document.getElementById("pending-detail-copy"),
+    pendingDetailActions: document.getElementById("pending-detail-actions"),
+    pendingDetailList: document.getElementById("pending-detail-list"),
+    pendingDetailClose: document.getElementById("pending-detail-close"),
   };
 }
 
-function togglePaid(kind, id, creditId, installmentIndex, source = {}) {
+function applyPaidToggle(kind, id, creditId, installmentIndex, source = {}) {
   const isLate = Boolean(source.kind && source.year !== "" && source.month !== "" && source.id);
   const monthData = isLate ? ensureMonth(Number(source.year), Number(source.month)) : getMonthData();
   const targetKind = isLate ? source.kind : kind;
@@ -1370,10 +1808,12 @@ function togglePaid(kind, id, creditId, installmentIndex, source = {}) {
     const index = Number(installmentIndex);
     const credit = state.credits.find((item) => item.id === creditId);
     const nextValue = credit ? !isCreditInstallmentPaid(credit, index) : false;
-    setCreditInstallmentPaid(creditId, index, nextValue);
-    return;
+    setCreditInstallmentPaid(creditId, index, nextValue, false);
   }
+}
 
+function togglePaid(kind, id, creditId, installmentIndex, source = {}) {
+  applyPaidToggle(kind, id, creditId, installmentIndex, source);
   saveState();
   render();
 }
@@ -1417,8 +1857,8 @@ function bindEvents() {
   populateMonthSelect(dom.editMonth);
   dom.subscriptionMonth.value = String(selectedMonth);
   dom.chargeMonth.value = String(selectedMonth);
-  toggleAnnualMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
-  toggleAnnualMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth);
+  toggleMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
+  toggleMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth, true);
   configureEditFrequencyOptions("subscription");
 
   dom.navPills.forEach((button) => {
@@ -1428,7 +1868,18 @@ function bindEvents() {
   dom.filterPills.forEach((button) => {
     button.addEventListener("click", () => {
       activeBillFilter = button.dataset.filter;
+      showAllPayables = false;
+      showAllReceivables = false;
       dom.filterPills.forEach((item) => item.classList.toggle("active", item === button));
+      renderDashboard();
+    });
+  });
+
+  dom.receivableFilterPills.forEach((button) => {
+    button.addEventListener("click", () => {
+      activeReceivableFilter = button.dataset.receivableFilter;
+      showAllReceivables = false;
+      dom.receivableFilterPills.forEach((item) => item.classList.toggle("active", item === button));
       renderDashboard();
     });
   });
@@ -1447,16 +1898,28 @@ function bindEvents() {
 
     if (action === "prev-year") {
       selectedYear -= 1;
+      showAllPayables = false;
+      showAllReceivables = false;
+      activeReceivableFilter = "all";
+      dom.receivableFilterPills.forEach((item) => item.classList.toggle("active", item.dataset.receivableFilter === "all"));
       render();
     }
 
     if (action === "next-year") {
       selectedYear += 1;
+      showAllPayables = false;
+      showAllReceivables = false;
+      activeReceivableFilter = "all";
+      dom.receivableFilterPills.forEach((item) => item.classList.toggle("active", item.dataset.receivableFilter === "all"));
       render();
     }
 
     if (action === "select-month") {
       selectedMonth = Number(button.dataset.month);
+      showAllPayables = false;
+      showAllReceivables = false;
+      activeReceivableFilter = "all";
+      dom.receivableFilterPills.forEach((item) => item.classList.toggle("active", item.dataset.receivableFilter === "all"));
       render();
     }
 
@@ -1467,6 +1930,30 @@ function bindEvents() {
         month: button.dataset.sourceMonth,
         id: button.dataset.sourceId,
       });
+    }
+
+    if (action === "open-pending-detail") {
+      openPendingDetail(button.dataset.groupKey, button.dataset.kind);
+    }
+
+    if (action === "resolve-overdue-group" && pendingDetailState) {
+      resolvePendingItems(pendingDetailState.items, true);
+    }
+
+    if (action === "resolve-all-group" && pendingDetailState) {
+      resolvePendingItems(pendingDetailState.items);
+    }
+
+    if (action === "resolve-single-pending") {
+      applyPaidToggle(button.dataset.kind, button.dataset.id, button.dataset.creditId, button.dataset.index, {
+        kind: button.dataset.sourceKind,
+        year: button.dataset.sourceYear,
+        month: button.dataset.sourceMonth,
+        id: button.dataset.sourceId,
+      });
+      saveState();
+      render();
+      refreshPendingDetail();
     }
 
     if (action === "delete-bill") {
@@ -1554,19 +2041,37 @@ function bindEvents() {
   dom.calendarPopover.addEventListener("mouseleave", hideCalendarPopover);
 
   dom.subscriptionFrequency.addEventListener("change", () => {
-    toggleAnnualMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
+    toggleMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
   });
 
   dom.chargeFrequency.addEventListener("change", () => {
-    toggleAnnualMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth);
+    toggleMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth, true);
   });
 
   dom.editFrequency.addEventListener("change", () => {
-    toggleAnnualMonthField(dom.editFrequency, dom.editMonthWrap, dom.editMonth);
+    toggleMonthField(dom.editFrequency, dom.editMonthWrap, dom.editMonth, recurringEditState?.kind === "charge");
   });
 
   dom.editCancel.addEventListener("click", () => {
     dom.recurringEditDialog.close();
+  });
+
+  dom.pendingDetailClose.addEventListener("click", () => {
+    closePendingDetail();
+  });
+
+  dom.pendingDetailDialog.addEventListener("close", () => {
+    pendingDetailState = null;
+  });
+
+  dom.monthItemsToggle.addEventListener("click", () => {
+    showAllPayables = !showAllPayables;
+    renderDashboard();
+  });
+
+  dom.receivableItemsToggle.addEventListener("click", () => {
+    showAllReceivables = !showAllReceivables;
+    renderDashboard();
   });
 
   document.addEventListener("change", (event) => {
@@ -1600,7 +2105,7 @@ function bindEvents() {
     event.target.reset();
     dom.subscriptionFrequency.value = "monthly";
     dom.subscriptionMonth.value = String(selectedMonth);
-    toggleAnnualMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
+    toggleMonthField(dom.subscriptionFrequency, dom.subscriptionMonthWrap, dom.subscriptionMonth);
     saveState();
     render();
   });
@@ -1677,17 +2182,20 @@ function bindEvents() {
       dueDay: clampDay(document.getElementById("charge-day").value),
       frequency: document.getElementById("charge-frequency").value,
       dueMonth:
-        document.getElementById("charge-frequency").value === "annual"
+        document.getElementById("charge-frequency").value === "annual" || document.getElementById("charge-frequency").value === "once"
           ? Number(document.getElementById("charge-month").value)
           : null,
       startYear: selectedYear,
-      startMonth: selectedMonth,
+      startMonth:
+        document.getElementById("charge-frequency").value === "once"
+          ? Number(document.getElementById("charge-month").value)
+          : selectedMonth,
       revisions: [],
     });
     event.target.reset();
     dom.chargeFrequency.value = "monthly";
     dom.chargeMonth.value = String(selectedMonth);
-    toggleAnnualMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth);
+    toggleMonthField(dom.chargeFrequency, dom.chargeMonthWrap, dom.chargeMonth, true);
     saveState();
     render();
   });
@@ -1745,6 +2253,8 @@ function bindEvents() {
       value: numberValue(document.getElementById("template-value").value),
       dueDay: clampDay(document.getElementById("template-day").value),
       manual: document.getElementById("template-manual").checked,
+      startYear: selectedYear,
+      startMonth: selectedMonth,
     });
     event.target.reset();
     saveState();
