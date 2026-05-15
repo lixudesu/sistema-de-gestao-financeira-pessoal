@@ -1,10 +1,14 @@
-﻿import { app } from "./context.js";
-import { loadState } from "./logic.js";
+import { app } from "./context.js";
+import { hydrateState } from "./logic.js";
 import { cacheDom, render, setView } from "./ui.js";
 import { bindEvents } from "./events.js";
 
-app.state = loadState();
-cacheDom();
-bindEvents();
-render();
-setView(app.activeView, { render: false });
+async function init() {
+  app.state = await hydrateState();
+  cacheDom();
+  bindEvents();
+  render();
+  setView(app.activeView, { render: false });
+}
+
+void init();

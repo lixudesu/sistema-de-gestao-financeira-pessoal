@@ -1,4 +1,8 @@
 import { app, STORAGE_KEY, monthNames, categoryConfig, today } from "./context.js";
+
+const REMOTE_STATE_ENDPOINT = "/api/state";
+let remotePersistenceAvailable = null;
+let remoteSaveChain = Promise.resolve();
 function createDefaultState() {
   return {
     settings: {
@@ -16,14 +20,103 @@ function loadState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return createDefaultState();
-    return { ...createDefaultState(), ...JSON.parse(stored) };
+    return normalizeImportedState(JSON.parse(stored));
   } catch {
     return createDefaultState();
   }
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(app.state));
+  persistLocalState(app.state);
+  if (remotePersistenceAvailable === true) {
+    queueRemoteSave(app.state);
+  }
+}
+
+function persistLocalState(snapshot) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+}
+
+async function requestRemoteState(resource, init = {}, timeoutMs = 2000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(resource, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function fetchRemoteState() {
+  const response = await requestRemoteState(REMOTE_STATE_ENDPOINT, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`remote_${response.status}`);
+  }
+
+  remotePersistenceAvailable = true;
+  const payload = await response.json();
+  return payload?.state ?? null;
+}
+
+async function writeRemoteState(snapshot) {
+  const response = await requestRemoteState(
+    REMOTE_STATE_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ state: snapshot }),
+    },
+    3000,
+  );
+
+  if (!response.ok) {
+    throw new Error(`remote_${response.status}`);
+  }
+
+  remotePersistenceAvailable = true;
+}
+
+function queueRemoteSave(snapshot) {
+  const payload = JSON.parse(JSON.stringify(snapshot));
+  remoteSaveChain = remoteSaveChain
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await writeRemoteState(payload);
+      } catch {
+        remotePersistenceAvailable = false;
+      }
+    });
+}
+
+async function hydrateState() {
+  const localState = loadState();
+
+  try {
+    const remoteState = await fetchRemoteState();
+    if (!remoteState || typeof remoteState !== "object") {
+      queueRemoteSave(localState);
+      return localState;
+    }
+
+    const normalized = normalizeImportedState(remoteState);
+    persistLocalState(normalized);
+    return normalized;
+  } catch {
+    remotePersistenceAvailable = false;
+    return localState;
+  }
 }
 
 function normalizeImportedState(payload) {
@@ -966,6 +1059,7 @@ function calculateAnnualOverview(annual = calculateAnnual()) {
 export {
   createDefaultState,
   loadState,
+  hydrateState,
   saveState,
   normalizeImportedState,
   uid,

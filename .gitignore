@@ -1,3 +1,4 @@
 node_modules/
 dist/
 .DS_Store
+save/data.json
